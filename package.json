@@ -1,6 +1,6 @@
 {
   "name": "dock-profiler",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A macOS app for Dock profiles, with an optional desktop (Space + wallpaper) attached to each one.",
   "private": true,
   "scripts": {

@@ -184,16 +184,19 @@ captured Dock is restored exactly, not approximated.
 **Focus mode integration.** macOS exposes no supported way to observe the active Focus,
 so profiles are switched by hand, by the menu bar, or by whatever you script around them.
 
+What changed per version is in the [changelog](./CHANGELOG.md).
+
 ## Releasing
 
 `.github/workflows/release.yml` builds, signs, notarizes and staples on a `macos-15`
 runner, then attaches a zip and a disk image to the release.
 
-1. Bump the version with `npm version patch` (or `minor` / `major`). This updates
+1. Add an entry to `CHANGELOG.md`, under a new `## [<version>] - <date>` heading.
+2. Bump the version with `npm version patch` (or `minor` / `major`). This updates
    `package.json` — the only place the version lives — and commits and tags it as
    `v<version>`, npm's default tag format.
-2. `git push --follow-tags`.
-3. Publish a GitHub release for that tag.
+3. `git push --follow-tags`.
+4. Publish a GitHub release for that tag.
 
 The tag and `package.json` have to agree, or the workflow stops before building — that
 guard is what makes `npm version` the source of truth rather than an editor typo.

@@ -5,6 +5,14 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-03
+
+### Fixed
+
+- **The menu bar panel washed out over light wallpapers.** It now uses the same
+  blurred, tinted background as the Quick Switcher, so the panel stays legible
+  regardless of what's behind it.
+
 ## [1.0.0] - 2026-09-03
 
 First release.

@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: "Sign and notarize (needs the Apple secrets)"
+        type: boolean
+        default: true
+      tag:
+        description: "Also attach the build to this release tag, e.g. v1.0.1 (leave empty to only keep the artifact)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build, sign and notarize
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -switch /Applications/Xcode.app
+
+      # A release tag of v1.2.3 must match package.json's version, otherwise the
+      # bundle would ship stamped with a different number than the tag.
+      - name: Check the version matches the tag
+        if: github.event_name == 'release' || inputs.tag != ''
+        run: |
+          TAG="${{ github.event_name == 'release' && github.ref_name || inputs.tag }}"
+          TAG="${TAG#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match package.json version $PKG."
+            echo "Run 'npm version $TAG' on main, push, then recreate the release."
+            exit 1
+          fi
+
+      # Only when we are actually signing. Without the secrets the run still
+      # produces an ad-hoc build, which is useful for checking a tag compiles.
+      - name: Import the Developer ID certificate
+        id: certificate
+        if: github.event_name == 'release' || inputs.notarize
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERTIFICATE_P12:-}" ]; then
+            echo "::warning::MACOS_CERTIFICATE is not set — building ad-hoc signed, without notarization."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          # Random per-run password: this keychain is thrown away with the runner.
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+
+          echo -n "$CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "" -T /usr/bin/codesign
+          # Lets codesign use the key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          rm -f "$CERT_PATH"
+
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No Developer ID Application identity found in the imported certificate."
+            exit 1
+          fi
+          echo "Using identity: $IDENTITY"
+          echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build, sign, notarize and staple
+        env:
+          NOTARY_APPLE_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ "${{ steps.certificate.outputs.signed }}" = "true" ]; then
+            ./Scripts/build_app.sh --notarize --dmg
+          else
+            ./Scripts/build_app.sh --zip --dmg
+          fi
+
+      # Both carry a ticket of their own: the app's covers a copy dragged out of
+      # the image, the image's covers a download that is never opened.
+      - name: Confirm the tickets are stapled
+        if: steps.certificate.outputs.signed == 'true'
+        run: |
+          xcrun stapler validate "build/Dock Profiler.app"
+          spctl --assess --type execute --verbose=2 "build/Dock Profiler.app"
+          xcrun stapler validate "build/Dock Profiler.dmg"
+
+      - name: Name the downloads after the version
+        id: archive
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          ZIP="DockProfiler-$VERSION-macos-universal.zip"
+          DMG="DockProfiler-$VERSION-macos-universal.dmg"
+          mv "build/Dock Profiler.zip" "build/$ZIP"
+          mv "build/Dock Profiler.dmg" "build/$DMG"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "path=build/$ZIP" >> "$GITHUB_OUTPUT"
+          echo "dmg=build/$DMG" >> "$GITHUB_OUTPUT"
+
+      # GitHub always wraps an artifact in a zip of its own, so this name must
+      # differ from the zip inside it. Naming both the same makes the download
+      # and its payload collide on disk, and Archive Utility gives up with
+      # "unsupported format". The release asset is the real download; this one
+      # is a build convenience, and unpacks in two steps.
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockprofiler-${{ steps.archive.outputs.version }}-build
+          path: |
+            ${{ steps.archive.outputs.path }}
+            ${{ steps.archive.outputs.dmg }}
+          if-no-files-found: error
+          retention-days: 90
+
+      # Also reachable from workflow_dispatch with a tag, so a release whose
+      # build failed can be repaired without cutting a new one. Gated on
+      # signed=true so an unsigned run (no MACOS_CERTIFICATE configured yet)
+      # never overwrites good release assets with a Gatekeeper-blocked build.
+      - name: Attach the app to the release
+        if: (github.event_name == 'release' || inputs.tag != '') && steps.certificate.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ github.event_name == 'release' && github.ref_name || inputs.tag }}
+        run: |
+          gh release upload "$TARGET" \
+            "${{ steps.archive.outputs.path }}" \
+            "${{ steps.archive.outputs.dmg }}" --clobber
+
+      - name: Note that nothing was attached
+        if: (github.event_name == 'release' || inputs.tag != '') && steps.certificate.outputs.signed != 'true'
+        run: |
+          echo "::warning::MACOS_CERTIFICATE is not set, so this build is unsigned and was not attached to the release. Set the signing secrets (see the README's Releasing section), or attach a build by hand."
+
+      # What makes `brew install --cask estruyf/tap/dock-profiler` resolve.
+      # Only a published, non-prerelease, signed build belongs in the tap: the
+      # cask carries a single version, and a prerelease or an unsigned build
+      # would hand it to everyone running `brew upgrade --greedy` while
+      # `releases/latest` still points elsewhere — or ship a build Gatekeeper
+      # refuses to open.
+      - name: Update the Homebrew tap
+        if: github.event_name == 'release' && github.event.release.prerelease == false && steps.certificate.outputs.signed == 'true'
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.archive.outputs.version }}
+          ZIP: ${{ steps.archive.outputs.path }}
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the tap still serves the previous version. Run homebrew/publish-cask.sh --push by hand."
+            exit 0
+          fi
+          ./homebrew/publish-cask.sh --push
+
+      - name: Clean up the keychain
+        if: always()
+        run: |
+          security list-keychain -d user -s login.keychain-db || true
+          rm -f "$RUNNER_TEMP/build.keychain-db" "$RUNNER_TEMP/certificate.p12"

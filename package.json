@@ -1,0 +1,22 @@
+{
+  "name": "dock-profiler",
+  "version": "1.0.0",
+  "description": "A macOS app for Dock profiles, with an optional desktop (Space + wallpaper) attached to each one.",
+  "private": true,
+  "scripts": {
+    "build": "./Scripts/build_app.sh",
+    "build:debug": "./Scripts/build_app.sh --debug",
+    "build:install": "./Scripts/build_app.sh --install",
+    "build:zip": "./Scripts/build_app.sh --zip",
+    "build:dmg": "./Scripts/build_app.sh --dmg",
+    "sign": "CODESIGN_IDENTITY=\"${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*\"\\(Developer ID Application: [^\"]*\\)\".*/\\1/p' | head -1)}\" ./Scripts/build_app.sh --zip",
+    "notarize": "CODESIGN_IDENTITY=\"${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*\"\\(Developer ID Application: [^\"]*\\)\".*/\\1/p' | head -1)}\" ./Scripts/build_app.sh --notarize",
+    "release": "CODESIGN_IDENTITY=\"${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning | sed -n 's/.*\"\\(Developer ID Application: [^\"]*\\)\".*/\\1/p' | head -1)}\" ./Scripts/build_app.sh --notarize --dmg",
+    "open": "open \"build/Dock Profiler.app\"",
+    "quit": "osascript -e 'quit app \"Dock Profiler\"' 2>/dev/null || true",
+    "screenshots": "./Scripts/make_screenshots.sh",
+    "icon": "swift Scripts/make-icon.swift build/AppIcon.iconset && open build/AppIcon.iconset",
+    "clean": "rm -rf .build build",
+    "cask": "./homebrew/publish-cask.sh"
+  }
+}

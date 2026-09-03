@@ -5,6 +5,18 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-03
+
+### Fixed
+
+- **A black line ran across the profile manager's header.** AppKit ruled its
+  titlebar separator straight through the toolbar that names the profile. The
+  window now draws no separator at all.
+- **The pane jumped when you moved between Settings and a profile.** Settings
+  put nothing in the toolbar, so the titlebar shrank from 52 to 28 points and
+  the top of the pane — scrollbar included — moved with it. Settings now names
+  itself in the header the way a profile does, and both keep the same height.
+
 ## [1.1.0] - 2026-09-03
 
 ### Changed

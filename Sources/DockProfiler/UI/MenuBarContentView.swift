@@ -53,6 +53,7 @@ struct MenuBarContentView: View {
             footer
         }
         .frame(width: 300)
+        .background(MenuBackground())
     }
 
     /// Tall enough for every profile, up to a point, then it scrolls.
@@ -142,6 +143,16 @@ struct MenuBarContentView: View {
             name = "\(base) \(index)"
         }
         return name
+    }
+}
+
+/// Blur, plus a tint heavy enough that the desktop behind never washes the menu out.
+private struct MenuBackground: View {
+    var body: some View {
+        ZStack {
+            VisualEffectView(material: .hudWindow)
+            Color(nsColor: .windowBackgroundColor).opacity(0.80)
+        }
     }
 }
 

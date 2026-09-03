@@ -26,6 +26,10 @@ final class ManagerWindowController: NSObject, NSWindowDelegate {
             window.titleVisibility = .hidden
             window.toolbarStyle = .unified
             window.titlebarAppearsTransparent = false
+            // Without this AppKit rules a hairline across the titlebar at the
+            // height a title row would have had — straight through the toolbar
+            // that names the profile.
+            window.titlebarSeparatorStyle = .none
             window.setContentSize(NSSize(width: 940, height: 620))
             window.setFrameAutosaveName("DockProfilerManagerWindow")
             window.isReleasedWhenClosed = false

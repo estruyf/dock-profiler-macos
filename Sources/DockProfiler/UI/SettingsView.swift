@@ -67,5 +67,18 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .toolbar { toolbarContent }
+    }
+
+    /// The profile pane names itself in the titlebar; without a matching item
+    /// here the toolbar changes height as you move between the two and the
+    /// detail pane jumps.
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            PaneTitle(symbol: "gearshape", tint: .secondary) {
+                Text("Settings").font(.system(size: 15, weight: .semibold))
+            }
+        }
     }
 }

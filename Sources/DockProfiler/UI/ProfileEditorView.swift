@@ -336,10 +336,7 @@ struct ProfileEditorView: View {
             Button {
                 showingIdentity = true
             } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: profile.symbol)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(profile.color.color)
+                PaneTitle(symbol: profile.symbol, tint: profile.color.color) {
                     Text(profile.name).font(.system(size: 15, weight: .semibold))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
@@ -353,8 +350,6 @@ struct ProfileEditorView: View {
                             .background(Capsule().fill(Color.green.opacity(0.15)))
                     }
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(titleHovering ? Color.primary.opacity(0.09) : .clear)

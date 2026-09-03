@@ -39,7 +39,7 @@ struct WelcomeView: View {
             }
             .padding(.top, 24)
 
-            Text("Dock Profiler needs no permissions for this. Switching desktops later asks for Accessibility.")
+            Text("Dock Profiler asks for no permissions at all — it reads and writes your Dock, and nothing else.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .padding(.top, 18)

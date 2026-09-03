@@ -121,8 +121,8 @@ rm -rf "$ICONSET"
 
 echo "==> Signing with identity: $IDENTITY"
 if [ "$IDENTITY" = "-" ]; then
-  # Ad-hoc, with a stable identifier. macOS ties Accessibility approval to the
-  # signature, so a rebuild means granting it again.
+  # Ad-hoc, with a stable identifier so the bundle keeps one identity across
+  # rebuilds. Fine for local use; distribution needs a Developer ID below.
   codesign --force --sign - --identifier dev.eliostruyf.DockProfiler "$APP"
 else
   # No --deep: Apple discourages it, and this bundle has no nested code.

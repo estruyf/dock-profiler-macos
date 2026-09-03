@@ -18,9 +18,13 @@ final class ManagerWindowController: NSObject, NSWindowDelegate {
             )
             let window = NSWindow(contentViewController: hosting)
             window.title = "Dock Profiles"
-            // The toolbar names the profile; a second title beside it just repeats.
-            window.titleVisibility = .hidden
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            // Both after the style mask, which is what AppKit reads them against.
+            // The toolbar names the profile; a second title beside it just repeats
+            // — and left to decide for itself, AppKit can give the title a row of
+            // its own and rule a line across the toolbar underneath it.
+            window.titleVisibility = .hidden
+            window.toolbarStyle = .unified
             window.titlebarAppearsTransparent = false
             window.setContentSize(NSSize(width: 940, height: 620))
             window.setFrameAutosaveName("DockProfilerManagerWindow")
@@ -32,5 +36,22 @@ final class ManagerWindowController: NSObject, NSWindowDelegate {
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The pre-macOS 15 half of hiding the title (see `NoWindowTitle`): SwiftUI
+    /// can set it visible again when the detail pane changes, and this puts it
+    /// back on the next window update. `.navigationTitle("")` would do it too,
+    /// but it takes the pane's own toolbar items with it.
+    func windowDidUpdate(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window.titleVisibility != .hidden else { return }
+        window.titleVisibility = .hidden
+    }
+
+    /// Settings is a row in the manager's sidebar rather than a window of its
+    /// own, so opening it means opening the manager on that row.
+    func showSettings() {
+        WindowRouter.shared.settingsRequest += 1
+        show()
     }
 }

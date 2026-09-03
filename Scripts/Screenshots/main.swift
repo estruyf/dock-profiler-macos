@@ -36,8 +36,6 @@ func writeDemoProfiles() {
         "/Applications/Slack.app",
         "/System/Applications/Notes.app",
     ])
-    development.desktop.switchesSpace = true
-    development.desktop.spaceIndex = 2
 
     var design = DockProfile(name: "Design")
     design.color = .pink
@@ -49,8 +47,6 @@ func writeDemoProfiles() {
         "|",
         "/System/Applications/Music.app",
     ])
-    design.desktop.switchesSpace = true
-    design.desktop.spaceIndex = 3
 
     var focus = DockProfile(name: "Focus")
     focus.color = .purple

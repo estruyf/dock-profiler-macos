@@ -4,7 +4,6 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @EnvironmentObject private var store: ProfileStore
-    @State private var hasAccessibility = SpaceService.hasAccessibilityAccess
 
     var body: some View {
         Form {
@@ -13,7 +12,11 @@ struct SettingsView: View {
                 if let error = settings.loginItemError {
                     Text(error).font(.caption).foregroundStyle(.orange)
                 }
-                Toggle("Show the active profile name in the menu bar", isOn: $settings.showProfileNameInMenuBar)
+                Toggle("Use the active profile's icon in the menu bar", isOn: $settings.showProfileIconInMenuBar)
+                Text("The menu bar shows the glyph of whichever profile is active instead of the Dock Profiler icon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Toggle("Ask before deleting a profile", isOn: $settings.confirmBeforeDelete)
                 LabeledContent("Welcome screen") {
                     Button("Show again") { WelcomeWindowController.shared.show() }
@@ -50,34 +53,6 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Desktops") {
-                Picker("Switch desktops using", selection: $settings.spaceSwitchMethod) {
-                    ForEach(SpaceSwitchMethod.allCases) { method in
-                        Text(method.title).tag(method)
-                    }
-                }
-                Text(settings.spaceSwitchMethod.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                LabeledContent("Accessibility access") {
-                    HStack(spacing: 8) {
-                        Label(
-                            hasAccessibility ? "Granted" : "Not granted",
-                            systemImage: hasAccessibility ? "checkmark.circle.fill" : "xmark.circle.fill"
-                        )
-                        .foregroundStyle(hasAccessibility ? .green : .orange)
-                        Button("Open Settings…") {
-                            SpaceService.requestAccessibilityAccess()
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        }
-                        .controlSize(.small)
-                    }
-                }
-            }
-
             Section("Storage") {
                 LabeledContent("Profiles are stored locally") {
                     Button("Reveal in Finder") {
@@ -92,7 +67,5 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 520)
-        .onAppear { hasAccessibility = SpaceService.hasAccessibilityAccess }
     }
 }

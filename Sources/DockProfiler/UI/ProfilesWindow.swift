@@ -2,29 +2,55 @@ import AppKit
 import SwiftUI
 
 struct ProfilesWindow: View {
+    /// The sidebar lists the profiles and, under them, Settings — which opens in
+    /// the same detail pane rather than a window of its own.
+    private enum SidebarItem: Hashable {
+        case profile(UUID)
+        case settings
+    }
+
     @EnvironmentObject private var store: ProfileStore
     @ObservedObject private var router = WindowRouter.shared
-    @State private var selection: UUID?
+    @State private var selection: SidebarItem?
     @State private var profilePendingDeletion: DockProfile?
+
+    private var selectedProfileID: UUID? {
+        if case .profile(let id) = selection, store.profile(id) != nil { return id }
+        return nil
+    }
 
     var body: some View {
         NavigationSplitView {
             sidebar
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            if let selection, store.profile(selection) != nil {
-                ProfileEditorView(profile: store.binding(for: selection))
-                    .id(selection)
+            if selection == .settings {
+                SettingsView()
+            } else if let id = selectedProfileID {
+                ProfileEditorView(profile: store.binding(for: id))
+                    .id(id)
             } else {
                 placeholder
             }
         }
         .frame(minWidth: 760, minHeight: 520)
+        .modifier(NoWindowTitle())
+        .background {
+            // An accessory app has no main menu for ⌘, to land in, so the window
+            // carries the shortcut itself, on a button that is never seen.
+            Button("Settings") { selection = .settings }
+                .keyboardShortcut(",", modifiers: .command)
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
         .onAppear { syncSelection() }
         .onChange(of: router.pendingSelection) { _, _ in syncSelection() }
+        .onChange(of: router.settingsRequest) { _, _ in selection = .settings }
         .onChange(of: store.profiles.count) { _, _ in
-            if selection == nil || store.profile(selection) == nil {
-                selection = store.profiles.last?.id
+            guard selection != .settings else { return }
+            if selectedProfileID == nil {
+                selection = store.profiles.last.map { .profile($0.id) }
             }
         }
         .alert(
@@ -49,12 +75,12 @@ struct ProfilesWindow: View {
             Section("Profiles") {
                 ForEach(store.profiles) { profile in
                     SidebarRow(profile: profile, isActive: profile.id == store.activeProfileID)
-                        .tag(profile.id)
+                        .tag(SidebarItem.profile(profile.id))
                         .contextMenu {
                             Button("Activate") { store.activate(profile.id) }
                             Button("Capture current Dock") { store.captureCurrentDock(into: profile.id) }
                             Button("Duplicate") {
-                                if let copy = store.duplicate(profile.id) { selection = copy.id }
+                                if let copy = store.duplicate(profile.id) { selection = .profile(copy.id) }
                             }
                             Divider()
                             Button("Delete", role: .destructive) { requestDelete(profile) }
@@ -62,12 +88,17 @@ struct ProfilesWindow: View {
                 }
                 .onMove { store.move(fromOffsets: $0, toOffset: $1) }
             }
+
+            Section {
+                Label("Settings", systemImage: "gearshape")
+                    .tag(SidebarItem.settings)
+            }
         }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
                 Button {
                     let profile = store.createProfile(named: newProfileName())
-                    selection = profile.id
+                    selection = .profile(profile.id)
                     router.pendingRename = profile.id
                 } label: {
                     Label("New from current Dock", systemImage: "plus")
@@ -75,12 +106,12 @@ struct ProfilesWindow: View {
                 .controlSize(.small)
                 Spacer()
                 Button {
-                    if let profile = store.profile(selection) { requestDelete(profile) }
+                    if let profile = store.profile(selectedProfileID) { requestDelete(profile) }
                 } label: {
                     Image(systemName: "trash")
                 }
                 .controlSize(.small)
-                .disabled(selection == nil)
+                .disabled(selectedProfileID == nil)
                 .help("Delete the selected profile")
             }
             .padding(10)
@@ -99,7 +130,7 @@ struct ProfilesWindow: View {
                 .foregroundStyle(.secondary)
             Button("New from current Dock") {
                 let profile = store.createProfile(named: newProfileName())
-                selection = profile.id
+                selection = .profile(profile.id)
                 router.pendingRename = profile.id
             }
             .padding(.top, 4)
@@ -117,10 +148,10 @@ struct ProfilesWindow: View {
 
     private func syncSelection() {
         if let pending = router.pendingSelection, store.profile(pending) != nil {
-            selection = pending
+            selection = .profile(pending)
             router.pendingSelection = nil
         } else if selection == nil {
-            selection = store.activeProfileID ?? store.profiles.first?.id
+            selection = (store.activeProfileID ?? store.profiles.first?.id).map { .profile($0) }
         }
     }
 
@@ -132,6 +163,20 @@ struct ProfilesWindow: View {
             name = "Profile \(index)"
         }
         return name
+    }
+}
+
+/// SwiftUI puts the window title back in the titlebar whenever the detail pane's
+/// toolbar changes — on top of the toolbar that already names the profile, with a
+/// rule drawn across it. macOS 15 has a modifier for dropping the title item;
+/// before that, `ManagerWindowController` re-hides it on the next window update.
+private struct NoWindowTitle: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.toolbar(removing: .title)
+        } else {
+            content
+        }
     }
 }
 

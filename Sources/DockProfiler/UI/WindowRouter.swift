@@ -7,5 +7,7 @@ final class WindowRouter: ObservableObject {
     @Published var pendingSelection: UUID?
     /// Set for a freshly created profile so the editor opens its name popover.
     @Published var pendingRename: UUID?
+    /// Bumped when something asks the manager to show Settings.
+    @Published var settingsRequest = 0
     private init() {}
 }

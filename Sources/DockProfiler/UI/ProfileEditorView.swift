@@ -76,9 +76,6 @@ struct ProfileEditorView: View {
         if profile.appearance.enabled {
             text = text + Text(", applies your ") + Text("Dock settings").bold()
         }
-        if profile.desktop.switchesSpace {
-            text = text + Text(" and jumps to ") + Text("Desktop \(profile.desktop.spaceIndex)").bold()
-        }
         if profile.desktop.setsWallpaper, profile.desktop.wallpaperPath != nil {
             text = text + Text(" and sets its ") + Text("wallpaper").bold()
         }

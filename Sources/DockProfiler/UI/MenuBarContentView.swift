@@ -109,14 +109,10 @@ struct MenuBarContentView: View {
                 MenuBarPanel.dismiss()
                 openManager(selecting: store.activeProfileID)
             }
-            SettingsLink {
-                MenuRowLabel(title: "Settings…", systemImage: "gearshape")
-            }
-            .buttonStyle(MenuRowButtonStyle())
-            .simultaneousGesture(TapGesture().onEnded {
+            MenuActionRow(title: "Settings…", systemImage: "gearshape") {
                 MenuBarPanel.dismiss()
-                NSApp.activate(ignoringOtherApps: true)
-            })
+                ManagerWindowController.shared.showSettings()
+            }
             MenuActionRow(title: "Quit Dock Profiler", systemImage: "power") {
                 NSApp.terminate(nil)
             }

@@ -43,24 +43,15 @@ struct DockAppearance: Codable, Hashable {
     var minimizeIntoIcon: Bool = false
 }
 
-/// The optional desktop half of a profile: jump to a Space and/or set a wallpaper.
+/// The optional desktop half of a profile: set a wallpaper when it is activated.
 struct DesktopOptions: Codable, Hashable {
-    var switchesSpace: Bool = false
-    var spaceIndex: Int = 1
     var setsWallpaper: Bool = false
     var wallpaperPath: String?
     var wallpaperAllScreens: Bool = true
 
-    var isActive: Bool { switchesSpace || (setsWallpaper && wallpaperPath != nil) }
+    var isActive: Bool { setsWallpaper && wallpaperPath != nil }
 
-    var summary: String? {
-        var parts: [String] = []
-        if switchesSpace { parts.append("Desktop \(spaceIndex)") }
-        if setsWallpaper, wallpaperPath != nil {
-            parts.append("Wallpaper")
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
+    var summary: String? { isActive ? "Wallpaper" : nil }
 }
 
 struct DockProfile: Codable, Identifiable, Hashable {

@@ -1,8 +1,8 @@
 # Dock Profiler
 
 A macOS app for **Dock profiles** — save a Dock layout, switch to it in one
-click — with an optional **desktop** attached to each profile: activating a profile can
-jump to a specific Space and set its wallpaper.
+click — with an optional **wallpaper** attached to each profile, set on the desktop you
+are on when you activate it.
 
 Everything is local. No account, no sync, no analytics.
 
@@ -51,7 +51,9 @@ it — same build either way:
 `build/`. See the header of the script for signing and notarization details.
 
 The app is a menu bar item (`LSUIElement`), so it has no Dock icon. The profile manager
-opens from the menu bar, or by opening the app again from Finder.
+opens from the menu bar, or by opening the app again from Finder. Settings lives in that
+window too, as the last row of the sidebar — from the menu bar panel, `Settings…` opens
+the manager on it, and `⌘,` selects it while the window has focus.
 
 ## First run
 
@@ -97,8 +99,7 @@ Three ways, all doing the same thing:
 | Pinned apps and spacers | Replaces `persistent-apps` in `com.apple.dock` |
 | Folders, files, stacks *(optional)* | Replaces `persistent-others` — off by default, so that side of the Dock is left alone |
 | Dock appearance *(optional)* | Position, size, magnification, auto-hide, recents, minimize-into-icon |
-| Desktop: Space *(optional)* | Switches to "Desktop N" |
-| Desktop: wallpaper *(optional)* | Sets the desktop picture on the Space you land on |
+| Desktop wallpaper *(optional)* | Sets the desktop picture on the desktop you are on |
 
 Spacers come in two sizes, regular and small. Flexible spacers are not offered — macOS
 does not apply them reliably — though one already in a captured Dock is preserved as-is.
@@ -117,45 +118,29 @@ profile does not claim stay exactly as they are.
 The profile you last activated tracks the Dock: drag an app in or out and the profile is
 updated to match. Turn it off in Settings → Active profile.
 
-## The desktop hookup
+## The wallpaper
 
-macOS has no public API for Spaces, and no API at all for *creating* one, so Dock Profiler
-does what a person would do:
+A profile can carry a wallpaper, set when the profile is activated. `NSWorkspace` sets
+the picture for whichever Space is on screen at that moment, so the wallpaper lands on
+the desktop you are on — which is how "the development desktop" ends up looking
+different from the others. Optionally on every display, or just the main one.
 
-* **Reading** — `com.apple.spaces` is an ordinary preferences domain. Dock Profiler reads it
-  to know how many desktops exist on the main display and which one you are on. The
-  strip in the editor shows them, with a green dot on the current one.
-* **Switching** — it posts the same keystroke you would press. Two methods, chosen in
-  Settings:
-  * **Arrow navigation** (default) — works out of the box: Dock Profiler works out the
-    distance and presses `Control + ←/→` that many times.
-  * **Control + number** — one keystroke, but you must first switch
-    "Switch to Desktop N" on under System Settings → Keyboard → Keyboard Shortcuts →
-    Mission Control.
-
-Both need **Accessibility** access (System Settings → Privacy & Security →
-Accessibility). The editor and Settings show whether it is granted and link straight
-there.
-
-**Creating desktops is manual.** Add them once in Mission Control (`Control + ↑`, then
-the `+`); Dock Profiler jumps to the one you pick. A profile pointing at a desktop that does
-not exist reports it instead of guessing.
-
-Wallpaper is applied *after* the desktop switch, because `NSWorkspace` sets the picture
-for whichever Space is on screen at that moment — which is how "the development desktop"
-ends up looking different from the others.
+Switching Spaces is not part of a profile. macOS has no public API for it, so it would
+mean posting `Control + ←/→` keystrokes and asking for Accessibility access — a
+permission for something the Dock profile itself never needed.
 
 ## Permissions
 
+Dock Profiler asks for **no privacy permissions at all**. It reads and writes
+`com.apple.dock`, sets the desktop picture through `NSWorkspace`, and registers its
+shortcut through Carbon hot keys — none of which need Accessibility, Screen Recording or
+Automation access.
+
 | Permission | Needed for | Prompted |
 | --- | --- | --- |
-| Accessibility | Switching desktops | On first switch, or from Settings |
+| *(none)* | Dock profiles, wallpaper | Nothing to grant |
 | *(none)* | The global shortcut | Carbon hot keys need no permission |
 | Login item | Launch at login | Settings toggle (`SMAppService`) |
-
-`Scripts/build_app.sh` signs the bundle ad-hoc. macOS ties Accessibility approval to the
-signature, so **after a rebuild you may have to remove and re-add Dock Profiler in the
-Accessibility list**. Signing with a real Developer ID certificate makes that stick.
 
 ## Layout
 
@@ -163,10 +148,9 @@ Accessibility list**. Signing with a real Developer ID certificate makes that st
 Sources/DockProfiler/
   DockProfilerApp.swift          MenuBarExtra + Settings scenes, app delegate
   Models/DockTile.swift      One Dock item; keeps the Dock's own tile dictionary verbatim
-  Models/DockProfile.swift   Profile, appearance and desktop options
+  Models/DockProfile.swift   Profile, appearance and wallpaper options
   Services/DockService.swift Reads/writes com.apple.dock, restarts the Dock
-  Services/SpaceService.swift  Reads com.apple.spaces, posts the switch keystrokes
-  Services/WallpaperService.swift
+  Services/WallpaperService.swift  Sets the desktop picture
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
   Services/DockWatcher.swift   Notices Dock changes for auto-save
   Services/AppSettings.swift   Preferences + login item

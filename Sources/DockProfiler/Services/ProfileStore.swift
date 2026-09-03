@@ -181,17 +181,6 @@ final class ProfileStore: ObservableObject {
             return
         }
 
-        if profile.desktop.switchesSpace {
-            do {
-                try await SpaceService.switchToDesktop(
-                    profile.desktop.spaceIndex,
-                    method: settings.spaceSwitchMethod
-                )
-            } catch {
-                lastError = error.localizedDescription
-            }
-        }
-
         if profile.desktop.setsWallpaper, let path = profile.desktop.wallpaperPath {
             do {
                 try WallpaperService.apply(path: path, allScreens: profile.desktop.wallpaperAllScreens)

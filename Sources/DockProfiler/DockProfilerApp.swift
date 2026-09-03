@@ -12,18 +12,17 @@ struct DockProfilerApp: App {
             MenuBarContentView()
                 .environmentObject(store)
         } label: {
-            if settings.showProfileNameInMenuBar, let profile = store.activeProfile {
-                Label(profile.name, systemImage: profile.symbol)
+            // A `MenuBarExtra` label draws the glyph and drops the title, so the
+            // name goes to the accessibility label rather than on screen.
+            if settings.showProfileIconInMenuBar, let profile = store.activeProfile {
+                Image(systemName: profile.symbol)
+                    .accessibilityLabel("Dock Profiler — \(profile.name)")
             } else {
                 Image(systemName: "dock.rectangle")
+                    .accessibilityLabel("Dock Profiler")
             }
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            SettingsView()
-                .environmentObject(store)
-        }
     }
 }
 

@@ -5,6 +5,34 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-03
+
+### Changed
+
+- **Settings moved into the profile manager**, as the last row of the sidebar:
+  select it and the settings open in the pane beside the profiles, instead of
+  in a window of their own. Reachable from the menu bar's `Settings…`, or with
+  `⌘,` while the manager has focus.
+- **"Show the active profile name in the menu bar" is now "Use the active
+  profile's icon in the menu bar"**, which is what the toggle always did — a
+  menu bar item shows the glyph and drops the title. Your existing preference
+  carries over.
+
+### Removed
+
+- **Switching desktops.** A profile no longer jumps to a Space when it is
+  activated: macOS has no API for it, so it meant posting `Control + ←/→`
+  keystrokes and asking for Accessibility access to do something the Dock
+  profile itself never needed. The wallpaper half is unchanged — it lands on
+  whichever desktop you are on. **Dock Profiler now asks for no privacy
+  permissions at all**, and Settings no longer has a Desktops section.
+
+### Fixed
+
+- **The window title no longer sits across the profile manager's toolbar.**
+  SwiftUI re-showed it whenever the detail pane changed, on top of the toolbar
+  that already names the profile.
+
 ## [1.0.1] - 2026-09-03
 
 ### Fixed

@@ -8,8 +8,8 @@ final class AppSettings: ObservableObject {
 
     private enum Key {
         static let autoSave = "autoSaveActiveProfile"
-        static let spaceMethod = "spaceSwitchMethod"
-        static let showNameInMenuBar = "showProfileNameInMenuBar"
+        // The name is historical: the menu bar only ever showed the glyph.
+        static let showIconInMenuBar = "showProfileNameInMenuBar"
         static let confirmBeforeDelete = "confirmBeforeDelete"
         static let switcherShortcut = "switcherShortcut"
         static let switcherShortcutEnabled = "switcherShortcutEnabled"
@@ -23,12 +23,9 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(autoSaveActiveProfile, forKey: Key.autoSave) }
     }
 
-    @Published var spaceSwitchMethod: SpaceSwitchMethod {
-        didSet { defaults.set(spaceSwitchMethod.rawValue, forKey: Key.spaceMethod) }
-    }
-
-    @Published var showProfileNameInMenuBar: Bool {
-        didSet { defaults.set(showProfileNameInMenuBar, forKey: Key.showNameInMenuBar) }
+    /// Swaps the menu bar glyph for the active profile's own.
+    @Published var showProfileIconInMenuBar: Bool {
+        didSet { defaults.set(showProfileIconInMenuBar, forKey: Key.showIconInMenuBar) }
     }
 
     @Published var confirmBeforeDelete: Bool {
@@ -81,17 +78,14 @@ final class AppSettings: ObservableObject {
     private init() {
         defaults.register(defaults: [
             Key.autoSave: true,
-            Key.showNameInMenuBar: false,
+            Key.showIconInMenuBar: false,
             Key.confirmBeforeDelete: true,
             Key.switcherShortcutEnabled: true,
         ])
         autoSaveActiveProfile = defaults.bool(forKey: Key.autoSave)
-        showProfileNameInMenuBar = defaults.bool(forKey: Key.showNameInMenuBar)
+        showProfileIconInMenuBar = defaults.bool(forKey: Key.showIconInMenuBar)
         confirmBeforeDelete = defaults.bool(forKey: Key.confirmBeforeDelete)
         hasSeenWelcome = defaults.bool(forKey: Key.hasSeenWelcome)
-        spaceSwitchMethod = SpaceSwitchMethod(
-            rawValue: defaults.string(forKey: Key.spaceMethod) ?? ""
-        ) ?? .arrows
         launchAtLogin = SMAppService.mainApp.status == .enabled
         switcherShortcutEnabled = defaults.bool(forKey: Key.switcherShortcutEnabled)
         if let data = defaults.data(forKey: Key.switcherShortcut) {

@@ -5,6 +5,21 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-09-16
+
+### Fixed
+
+- **Spacers could not be selected in the Dock preview.** A spacer is drawn as
+  a dashed outline, and only that hairline took the click. The whole tile now
+  does.
+- **⌫ did not remove the selected item.** Nothing in the editor ever took
+  keyboard focus, so the key never reached it. Clicking a tile in the preview,
+  or a card in the Items list, now focuses the preview: **⌫** removes the
+  selection and **⎋** clears it.
+- **Dragging a tile to reorder it did nothing.** Each tile was a button, which
+  claimed the mouse-down before a drag could begin. Tiles drag again, and one
+  let go between tiles no longer stays dimmed.
+
 ## [1.1.1] - 2026-09-03
 
 ### Fixed

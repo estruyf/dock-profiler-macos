@@ -23,7 +23,7 @@ struct ProfileEditorView: View {
     @State private var tab: EditorTab = .items
     @State private var section: DockSection = .apps
     @State private var selection: UUID?
-    @FocusState private var previewFocused: Bool
+    @State private var keyMonitor: Any?
     @State private var showingIdentity = false
     @State private var titleHovering = false
     @ObservedObject private var router = WindowRouter.shared
@@ -41,12 +41,14 @@ struct ProfileEditorView: View {
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
+            installKeyMonitor()
             // A profile created a moment ago still has a placeholder name.
             if router.pendingRename == profile.id {
                 router.pendingRename = nil
                 showingIdentity = true
             }
         }
+        .onDisappear(perform: removeKeyMonitor)
         .toolbar { toolbarContent }
     }
 
@@ -108,7 +110,6 @@ struct ProfileEditorView: View {
         DockPreviewStrip(
             tiles: tilesBinding,
             selection: $selection,
-            focused: $previewFocused,
             onAdd: addFromPanel,
             onDropURLs: add
         )
@@ -233,10 +234,7 @@ struct ProfileEditorView: View {
                     ForEach(tiles) { tile in
                         ItemCard(tile: tile, isSelected: selection == tile.id)
                             .contentShape(Rectangle())
-                            .onTapGesture {
-                                selection = tile.id
-                                previewFocused = true
-                            }
+                            .onTapGesture { selection = tile.id }
                             .contextMenu {
                                 Button("Remove from profile", role: .destructive) {
                                     tilesBinding.wrappedValue.removeAll { $0.id == tile.id }
@@ -396,7 +394,56 @@ struct ProfileEditorView: View {
         }
     }
 
+    // MARK: - Keyboard
+
+    /// ⌫ removes the selected tile and ⎋ clears the selection. Nothing in the editor
+    /// takes keyboard focus of its own (SwiftUI's `focusable()` only works on macOS
+    /// with keyboard navigation switched on), so the keys are picked up with a
+    /// monitor instead, stepping aside whenever a text field is being edited.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let keyCode = event.keyCode
+            let editingText = event.window?.firstResponder is NSTextView
+            let hasModifiers = !event.modifierFlags
+                .intersection(.deviceIndependentFlagsMask)
+                .subtracting(.function)  // forward delete carries the fn flag
+                .isEmpty
+            let consumed = MainActor.assumeIsolated {
+                handle(keyCode: keyCode, editingText: editingText, hasModifiers: hasModifiers)
+            }
+            return consumed ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+    }
+
+    private func handle(keyCode: UInt16, editingText: Bool, hasModifiers: Bool) -> Bool {
+        guard selection != nil, !editingText, !hasModifiers else { return false }
+        switch Int(keyCode) {
+        case 51, 117:  // ⌫, forward delete
+            removeSelection()
+            return true
+        case 53:  // esc
+            selection = nil
+            return true
+        default:
+            return false
+        }
+    }
+
     // MARK: - Editing
+
+    private func removeSelection() {
+        guard let selection else { return }
+        tilesBinding.wrappedValue.removeAll { $0.id == selection }
+        self.selection = nil
+    }
 
     private func append(_ tile: DockTile?) {
         guard let tile else { return }

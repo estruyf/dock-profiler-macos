@@ -3,13 +3,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Dock, drawn as a Dock. Reordering a profile happens here rather than in a list.
-///
-/// The strip owns keyboard focus for the editor: clicking a tile focuses it, after
-/// which ⌫ removes the selection and ⎋ clears it.
 struct DockPreviewStrip: View {
     @Binding var tiles: [DockTile]
     @Binding var selection: UUID?
-    var focused: FocusState<Bool>.Binding
     let onAdd: () -> Void
     let onDropURLs: ([URL]) -> Void
 
@@ -51,16 +47,6 @@ struct DockPreviewStrip: View {
             // A tile let go in the gaps between tiles still ends the drag cleanly.
             .onDrop(of: [.text], delegate: DragEndDelegate(dragging: $dragging))
         }
-        .focusable()
-        .focused(focused)
-        .focusEffectDisabled()
-        .onKeyPress(.delete) { removeSelection() }
-        .onKeyPress(.deleteForward) { removeSelection() }
-        .onKeyPress(.escape) {
-            guard selection != nil else { return .ignored }
-            selection = nil
-            return .handled
-        }
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(DockPalette.slab)
@@ -74,13 +60,6 @@ struct DockPreviewStrip: View {
             onDropURLs(urls)
             return true
         }
-    }
-
-    private func removeSelection() -> KeyPress.Result {
-        guard let selection else { return .ignored }
-        tiles.removeAll { $0.id == selection }
-        self.selection = nil
-        return .handled
     }
 
     @ViewBuilder
@@ -127,10 +106,7 @@ struct DockPreviewStrip: View {
         }
         // The spacer is only an outline; without this, clicks inside it fall through.
         .contentShape(Rectangle())
-        .onTapGesture {
-            selection = tile.id
-            focused.wrappedValue = true
-        }
+        .onTapGesture { selection = tile.id }
         .opacity(dragging?.id == tile.id ? 0.35 : 1)
         .help(tile.label)
         .contextMenu {

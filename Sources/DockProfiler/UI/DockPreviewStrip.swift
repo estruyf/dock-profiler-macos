@@ -3,9 +3,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Dock, drawn as a Dock. Reordering a profile happens here rather than in a list.
+///
+/// The strip owns keyboard focus for the editor: clicking a tile focuses it, after
+/// which ⌫ removes the selection and ⎋ clears it.
 struct DockPreviewStrip: View {
     @Binding var tiles: [DockTile]
     @Binding var selection: UUID?
+    var focused: FocusState<Bool>.Binding
     let onAdd: () -> Void
     let onDropURLs: ([URL]) -> Void
 
@@ -44,6 +48,18 @@ struct DockPreviewStrip: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
+            // A tile let go in the gaps between tiles still ends the drag cleanly.
+            .onDrop(of: [.text], delegate: DragEndDelegate(dragging: $dragging))
+        }
+        .focusable()
+        .focused(focused)
+        .focusEffectDisabled()
+        .onKeyPress(.delete) { removeSelection() }
+        .onKeyPress(.deleteForward) { removeSelection() }
+        .onKeyPress(.escape) {
+            guard selection != nil else { return .ignored }
+            selection = nil
+            return .handled
         }
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -60,51 +76,61 @@ struct DockPreviewStrip: View {
         }
     }
 
+    private func removeSelection() -> KeyPress.Result {
+        guard let selection else { return .ignored }
+        tiles.removeAll { $0.id == selection }
+        self.selection = nil
+        return .handled
+    }
+
     @ViewBuilder
     private func tileView(_ tile: DockTile) -> some View {
         let isSelected = selection == tile.id
 
-        Button {
-            selection = tile.id
-        } label: {
-            Group {
-                if tile.kind.isSpacer {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(
-                            DockPalette.onSlab.opacity(0.35),
-                            style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
-                        )
-                        .frame(width: 18, height: 56)
-                } else if let icon = tile.icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .frame(width: 56, height: 56)
-                } else {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(DockPalette.onSlab.opacity(0.12))
-                        .frame(width: 56, height: 56)
-                        .overlay(
-                            Image(systemName: tile.isMissing ? "questionmark" : tile.kind.symbolName)
-                                .foregroundStyle(DockPalette.onSlab.opacity(0.7))
-                        )
-                }
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .strokeBorder(Color.accentColor, lineWidth: 3)
-                    .opacity(isSelected ? 1 : 0)
-                    .padding(-3)
-            )
-            .overlay(alignment: .topTrailing) {
-                if tile.isMissing {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.orange)
-                        .padding(2)
-                }
+        // A plain view rather than a Button: a Button swallows the mouse-down that
+        // `onDrag` needs to start a drag session.
+        Group {
+            if tile.kind.isSpacer {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        DockPalette.onSlab.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])
+                    )
+                    .frame(width: 18, height: 56)
+            } else if let icon = tile.icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 56, height: 56)
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(DockPalette.onSlab.opacity(0.12))
+                    .frame(width: 56, height: 56)
+                    .overlay(
+                        Image(systemName: tile.isMissing ? "questionmark" : tile.kind.symbolName)
+                            .foregroundStyle(DockPalette.onSlab.opacity(0.7))
+                    )
             }
         }
-        .buttonStyle(.plain)
+        .overlay(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: 3)
+                .opacity(isSelected ? 1 : 0)
+                .padding(-3)
+        )
+        .overlay(alignment: .topTrailing) {
+            if tile.isMissing {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .padding(2)
+            }
+        }
+        // The spacer is only an outline; without this, clicks inside it fall through.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selection = tile.id
+            focused.wrappedValue = true
+        }
         .opacity(dragging?.id == tile.id ? 0.35 : 1)
         .help(tile.label)
         .contextMenu {
@@ -153,8 +179,8 @@ private struct TileReorderDelegate: DropDelegate {
 
     func dropEntered(info: DropInfo) {
         guard let dragging, dragging.id != item.id,
-              let from = tiles.firstIndex(of: dragging),
-              let to = tiles.firstIndex(of: item) else { return }
+              let from = tiles.firstIndex(where: { $0.id == dragging.id }),
+              let to = tiles.firstIndex(where: { $0.id == item.id }) else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
             tiles.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         }
@@ -162,6 +188,21 @@ private struct TileReorderDelegate: DropDelegate {
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        return true
+    }
+}
+
+/// Catches a tile dropped on the strip itself (between tiles or in the padding) so the
+/// dragged tile is not left dimmed.
+private struct DragEndDelegate: DropDelegate {
+    @Binding var dragging: DockTile?
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: dragging == nil ? .cancel : .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {

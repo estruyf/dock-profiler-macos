@@ -23,6 +23,7 @@ struct ProfileEditorView: View {
     @State private var tab: EditorTab = .items
     @State private var section: DockSection = .apps
     @State private var selection: UUID?
+    @FocusState private var previewFocused: Bool
     @State private var showingIdentity = false
     @State private var titleHovering = false
     @ObservedObject private var router = WindowRouter.shared
@@ -39,7 +40,6 @@ struct ProfileEditorView: View {
             .padding(20)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .onDeleteCommand(perform: removeSelection)
         .onAppear {
             // A profile created a moment ago still has a placeholder name.
             if router.pendingRename == profile.id {
@@ -108,6 +108,7 @@ struct ProfileEditorView: View {
         DockPreviewStrip(
             tiles: tilesBinding,
             selection: $selection,
+            focused: $previewFocused,
             onAdd: addFromPanel,
             onDropURLs: add
         )
@@ -232,10 +233,14 @@ struct ProfileEditorView: View {
                     ForEach(tiles) { tile in
                         ItemCard(tile: tile, isSelected: selection == tile.id)
                             .contentShape(Rectangle())
-                            .onTapGesture { selection = tile.id }
+                            .onTapGesture {
+                                selection = tile.id
+                                previewFocused = true
+                            }
                             .contextMenu {
                                 Button("Remove from profile", role: .destructive) {
                                     tilesBinding.wrappedValue.removeAll { $0.id == tile.id }
+                                    if selection == tile.id { selection = nil }
                                 }
                             }
                     }
@@ -398,15 +403,9 @@ struct ProfileEditorView: View {
         tilesBinding.wrappedValue.append(tile)
     }
 
-    private func removeSelection() {
-        guard let selection else { return }
-        tilesBinding.wrappedValue.removeAll { $0.id == selection }
-        self.selection = nil
-    }
-
     private func add(_ urls: [URL]) {
         var items = tiles
-        for url in urls {
+        for url in urls where url.isFileURL {
             if url.pathExtension == "app" || section == .apps {
                 if let tile = DockTile.app(at: url) { items.append(tile) }
             } else if let tile = DockTile.folder(at: url) {

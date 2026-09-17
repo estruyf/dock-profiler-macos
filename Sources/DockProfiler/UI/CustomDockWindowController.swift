@@ -8,10 +8,13 @@ struct CustomDockContent: Equatable {
     var options = CustomDockOptions()
     var items: [DockStripItem] = []
     var others: [DockTile] = []
+    /// The profile's colour, for a tinted slab.
+    var color: ProfileColor = .blue
 
     init(profile: DockProfile?) {
         guard let profile, profile.customDock.isActive else { return }
         options = profile.customDock
+        color = profile.color
         switch options.mode {
         case .combined:
             items = profile.appRow
@@ -72,11 +75,16 @@ private final class DockHostingView: NSHostingView<DockPanelContent> {
 private struct DockEdgeHint: View {
     let vertical: Bool
     let near: Bool
+    var style: DockStyle = .system
+
+    /// Glass draws a rim and shadow of its own, which is all there is room for in a
+    /// sliver this thin; the plain material keeps the pill a clean line.
+    private var material: DockStyle { style == .liquidGlass ? .system : style }
 
     var body: some View {
         Capsule(style: .continuous)
             .fill(DockPalette.onSlab.opacity(near ? 0.5 : 0.22))
-            .background(DockMaterial(cornerRadius: DockEdgeHint.thickness / 2))
+            .background(DockMaterial(style: material, cornerRadius: DockEdgeHint.thickness / 2).id(material))
             .overlay(Capsule(style: .continuous).strokeBorder(DockPalette.rim, lineWidth: 0.5))
             .frame(
                 width: vertical ? DockEdgeHint.thickness : nil,
@@ -113,6 +121,13 @@ final class CustomDockWindowController {
     private var content = CustomDockContent(profile: nil)
     private var cancellables = Set<AnyCancellable>()
     private var screenToken: NSObjectProtocol?
+    private var spaceToken: NSObjectProtocol?
+    private var appearanceObservation: NSKeyValueObservation?
+    /// For a style that shows the desktop through: light or dark to suit the
+    /// wallpaper under the slab. Nil when the style has its own, or the desktop
+    /// could not be read. See `DesktopBackdrop`.
+    private var desktopAppearance: NSAppearance?
+    private var backdropTimer: Timer?
 
     // Auto-hide
     private var pointerTimer: Timer?
@@ -123,12 +138,25 @@ final class CustomDockWindowController {
 
     var isVisible: Bool { panel?.isVisible == true }
 
+    /// The appearance the dock's style forces on its windows — the tooltip and
+    /// stack panels take it too, so they match the slab they sit beside. Glass and
+    /// no slab take theirs from the desktop under them. Nil when the dock follows
+    /// the system, or there is no dock.
+    var forcedAppearance: NSAppearance? {
+        guard content.isActive else { return nil }
+        return content.options.look.style.forcedAppearance ?? desktopAppearance
+    }
+
     /// Where the slab itself sits on screen when `window` is the dock's panel: the
     /// panel less the headroom on its far side that magnified tiles grow into. Nil
     /// for any other window, such as the editor showing a preview.
     func slabFrame(in window: NSWindow) -> NSRect? {
         guard let panel, window === panel else { return nil }
-        var frame = panel.frame
+        return slabFrame(in: panel.frame)
+    }
+
+    private func slabFrame(in panelFrame: NSRect) -> NSRect {
+        var frame = panelFrame
         let headroom = content.options.magnificationExtra + 4
         switch content.options.edge {
         case .bottom: frame.size.height -= headroom
@@ -164,6 +192,19 @@ final class CustomDockWindowController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.reposition() }
         }
+
+        // Each Space can have its own wallpaper, and a dynamic one changes with the
+        // appearance; the dock's own appearance follows either.
+        spaceToken = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateAppearance() }
+        }
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            Task { @MainActor in self?.updateAppearance() }
+        }
     }
 
     private func apply(_ content: CustomDockContent) {
@@ -171,6 +212,7 @@ final class CustomDockWindowController {
         DockStackController.shared.dismiss()
         guard content.isActive else {
             stopPointerTracking()
+            updateAppearance()
             panel?.orderOut(nil)
             hideHint()
             return
@@ -189,6 +231,8 @@ final class CustomDockWindowController {
                 edge: content.options.edge,
                 tileSize: content.options.tileSize,
                 magnificationExtra: content.options.magnificationExtra,
+                look: content.options.look,
+                tint: content.color.color,
                 onReorder: Self.reorder
             ),
             options: content.options
@@ -207,7 +251,42 @@ final class CustomDockWindowController {
             reposition()
             panel?.orderFrontRegardless()
         }
+        updateAppearance()
         updateHint()
+    }
+
+    // MARK: - Appearance
+
+    /// Sets the panels' appearance: the style's own, or for glass and no slab, one
+    /// that reads against the wallpaper under the slab. That is read again whenever
+    /// the dock moves or the desktop might have changed, and on a slow tick besides,
+    /// since a new wallpaper announces itself no other way.
+    private func updateAppearance(shown: NSRect? = nil) {
+        let style = content.options.look.style
+        var fromDesktop: NSAppearance?
+        if content.isActive, style.forcedAppearance == nil, style.showsDesktop,
+           !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
+           let screen, let shown = shown ?? shownFrame(),
+           let light = DesktopBackdrop.shared.isLight(under: slabFrame(in: shown), on: screen) {
+            fromDesktop = NSAppearance(named: light ? .aqua : .darkAqua)
+        }
+        desktopAppearance = fromDesktop
+
+        let appearance = forcedAppearance
+        if panel?.appearance?.name != appearance?.name {
+            panel?.appearance = appearance
+            hintPanel?.appearance = appearance
+        }
+
+        let watching = content.isActive && style.showsDesktop && style.forcedAppearance == nil
+        if watching, backdropTimer == nil {
+            backdropTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.updateAppearance() }
+            }
+        } else if !watching {
+            backdropTimer?.invalidate()
+            backdropTimer = nil
+        }
     }
 
     /// Writes an order dragged together in the dock back to the active profile: the
@@ -317,6 +396,10 @@ final class CustomDockWindowController {
         panel.setFrame(revealed ? shown : hiddenFrame(from: shown), display: true)
         if let hintPanel, hintShown {
             hintPanel.setFrame(hintFrame(for: shown), display: true)
+        }
+        // A different spot on the desktop may want a different appearance.
+        if content.options.look.style.showsDesktop {
+            updateAppearance(shown: shown)
         }
     }
 
@@ -476,6 +559,7 @@ final class CustomDockWindowController {
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.hidesOnDeactivate = false
+        panel.appearance = forcedAppearance
         // The pointer passes straight through to the trigger zone underneath.
         panel.ignoresMouseEvents = true
         panel.animationBehavior = .none
@@ -519,7 +603,7 @@ final class CustomDockWindowController {
         guard let shown = shownFrame() else { return }
         makeHintPanelIfNeeded()
         guard let hintPanel, let hintHosting else { return }
-        hintHosting.rootView = DockEdgeHint(vertical: content.options.edge.isVertical, near: pointerNearHint)
+        hintHosting.rootView = DockEdgeHint(vertical: content.options.edge.isVertical, near: pointerNearHint, style: content.options.look.style)
         hintPanel.setFrame(hintFrame(for: shown), display: true)
         guard !hintShown else { return }
         hintShown = true
@@ -551,6 +635,6 @@ final class CustomDockWindowController {
         guard near != pointerNearHint else { return }
         pointerNearHint = near
         guard hintShown, let hintHosting else { return }
-        hintHosting.rootView = DockEdgeHint(vertical: content.options.edge.isVertical, near: near)
+        hintHosting.rootView = DockEdgeHint(vertical: content.options.edge.isVertical, near: near, style: content.options.look.style)
     }
 }

@@ -150,7 +150,17 @@ In a column every widget becomes a tile the size of an icon and re-flows to fit 
 the battery's percentage moves under its icon, each agent session becomes a dot over
 its folder name — and hovering any tile shows the dock's own tooltip with the detail.
 A **size** slider (36–96 pt) scales icons, cards and type together, and **magnification**
-grows the tiles under the pointer, pushing their neighbours aside, as the Dock does. **Hide until the
+grows the tiles under the pointer, pushing their neighbours aside, as the Dock does. A
+**look** picks the slab: following the system, as the Dock does; light or dark
+whatever the system appearance — tiles, tips and stacks follow the slab; on macOS
+Tahoe, **Liquid Glass**, refracting what is behind it; or **transparent**, no slab at
+all, each widget on its own card. Those two read the wallpaper under the dock and go
+light or dark to suit it, as the Tahoe Dock does. The slab can blur what is behind it or be drawn
+solid — clear, for Liquid Glass — and is solid regardless while macOS's Reduce
+transparency is on. It can take a wash of
+the profile's colour, so each profile's dock is its own. Widgets can lose their cards
+for a flatter look, and a **density** picks how tightly the tiles are packed, the
+corners squaring off as it tightens. **Hide until the
 pointer reaches its edge** slides it off screen and brings it back when the pointer runs
 into the edge where it lives — polling the pointer position, so no Accessibility
 permission. While it is away, a slim mark stays on the edge where it went, so you
@@ -180,12 +190,16 @@ drag it along the dock and let go — the profile is updated as you drop.
   the menu bar.
 - **Trash** — full or empty. Click to open it, drop files on it to delete them, empty
   it from the context menu. Handy in a combined dock, which stands in for the Dock's own.
+- **AirDrop** — drop files on it and the AirDrop picker opens with them, so sending
+  something to the phone is one drag. Click it for Finder's AirDrop window.
 - **Folder** — a folder that opens into its most recent files, newest first, like a
   Dock stack. Downloads by default; choose any folder on its card in the editor.
 - **App Stack** — several apps folded into one tile, a grid of their icons, that opens
   into the apps. Add apps on its card or drop them from Finder.
 - **Agents** — see below. It can also fold into one tile with a count that opens into
   the list.
+- **AI Usage** — what is left of your Claude and GitHub Copilot allowances, a card per
+  service, as numbers, rings or bars. See below.
 
 Stacks open in a panel beside the dock, on the side away from its edge, that goes away
 on a click anywhere else — and, like the dock, never takes focus from the front app.
@@ -202,6 +216,32 @@ Click a card to bring that session's editor forward. The hook records the agent'
 process, and walking up from it reaches the app hosting the session — VS Code, Insiders,
 Cursor — so the folder is opened with that app, which focuses the window that already
 has it.
+
+### The AI Usage widget
+
+The **AI Usage** widget shows how much of your **Claude** and **GitHub Copilot**
+allowances is left — one card per service, drawn as numbers, rings or bars (pick on its
+card in the editor, along with which services to track). Each card shows the tightest
+of the service's main windows: Claude's 5-hour and weekly limits, Copilot's premium
+requests for the month. Blue while there is plenty, orange under a quarter, red under a
+tenth. Click a card for every window with its reset time and countdown — Claude's
+per-model weekly limits included — and refresh or jump to the service's usage page from
+the context menu. The numbers refresh every five minutes while the widget is on screen,
+and when the Mac wakes.
+
+There is nothing to sign in to: the widget reads the sign-in each service's own tools
+leave on your Mac.
+
+- **Claude** — Claude Code's OAuth token, from the `Claude Code-credentials` item in
+  your Keychain (or `~/.claude/.credentials.json`), sent to Anthropic's OAuth usage
+  endpoint. The token is only read, never refreshed — refreshing it from outside would
+  sign Claude Code out. If it has expired, the card says so; run `claude` once and it
+  comes back. Reading the item brings up macOS's Keychain dialog the first time; **Always
+  Allow** settles it for that build of the app.
+- **Copilot** — the GitHub token the Copilot extensions for VS Code and Xcode keep in
+  `~/.config/github-copilot/apps.json`, sent to the endpoint those editors ask for the
+  same numbers (`copilot_internal/user`). Sign in to Copilot in either editor and the
+  card fills in.
 
 Switching Spaces is not part of a profile. macOS has no public API for it, so it would
 mean posting `Control + ←/→` keystrokes and asking for Accessibility access — a
@@ -222,6 +262,7 @@ first time they do.
 | Automation → Music / Spotify | Now Playing's first read and its play, pause and skip; track changes themselves arrive over notifications that need nothing | Once, when the widget first asks the player |
 | Automation → Finder | Empty Trash from the Trash widget | Once, the first time you empty it |
 | Files and Folders | The Trash widget counting what is in the Trash; the Folder widget reading a protected folder such as Downloads | Once per folder |
+| Keychain | The AI Usage widget reading Claude Code's token from the `Claude Code-credentials` item | Once per build, with Always Allow |
 | Login item | Launch at login | Settings toggle (`SMAppService`) |
 
 ## Layout
@@ -238,6 +279,7 @@ Sources/DockProfiler/
   Services/AgentSessionMonitor.swift  Agent Frame's session files, for the agents widget
   Services/NowPlayingMonitor.swift    Music and Spotify, for the now-playing widget
   Services/TrashMonitor.swift         ~/.Trash, for the trash widget
+  Services/AIUsageMonitor.swift       Claude and Copilot allowances, for the AI usage widget
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
@@ -249,7 +291,7 @@ Sources/DockProfiler/
   UI/CustomDockWindowController.swift  The floating custom dock, following the active profile
   UI/DockTooltip.swift                 The dock's own hover tips
   UI/DockStack.swift                   The panel a stack widget opens into
-  UI/DockWidgets.swift                 Now playing, profiles, trash, folder and app stacks
+  UI/DockWidgets.swift                 Now playing, profiles, trash, folder and app stacks, AI usage
 ```
 
 Profiles live in `~/Library/Application Support/Dock Profiler/profiles.json`. Each item keeps

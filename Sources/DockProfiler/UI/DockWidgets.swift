@@ -243,8 +243,8 @@ struct AgentsStackTile: View {
         CardButton(action: open) {
             let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
             layout {
-                Image(systemName: "sparkles.rectangle.stack")
-                    .font(.system(size: environment.scaled(vertical ? 16 : 20)))
+                BotGlyph()
+                    .frame(width: environment.scaled(vertical ? 20 : 24), height: environment.scaled(vertical ? 20 : 24))
                     .foregroundStyle(monitor.sessions.isEmpty ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
                     .overlay(alignment: .topTrailing) {
                         if !monitor.sessions.isEmpty {
@@ -354,6 +354,163 @@ struct TrashWidget: View {
     private func open() {
         DockTooltipController.shared.cancel()
         TrashMonitor.reveal()
+    }
+}
+
+// MARK: - AirDrop
+
+/// AirDrop as a tile: drop files on it and the AirDrop picker opens with them, so
+/// sending something to the phone is one drag. Click it for Finder's AirDrop window.
+struct AirDropWidget: View {
+    let tile: WidgetTile
+
+    @Environment(\.dockTileSize) private var size
+    @State private var targeted = false
+
+    /// Finder's own AirDrop app: opening it brings up the AirDrop window.
+    private static let airDropApp = "/System/Library/CoreServices/Finder.app/Contents/Applications/AirDrop.app"
+
+    var body: some View {
+        // The mark on its own, on a card like the ring widgets beside it — Finder's
+        // white app icon would sit oddly among the dock's own tiles.
+        CardButton(action: open) {
+            AirDropGlyph()
+                .foregroundStyle(Color(nsColor: .systemBlue))
+                .frame(width: size * 0.62, height: size * 0.62)
+                .scaleEffect(targeted ? 1.15 : 1)
+                .animation(.easeOut(duration: 0.12), value: targeted)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            Self.send(urls)
+        } isTargeted: { targeted = $0 }
+        .dockTooltip("AirDrop", "Drop files here to send them to a nearby device")
+        .contextMenu {
+            Button("Open AirDrop") { Self.reveal() }
+        }
+    }
+
+    private func open() {
+        DockTooltipController.shared.cancel()
+        Self.reveal()
+    }
+
+    private static func reveal() {
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: airDropApp), configuration: .init())
+    }
+
+    /// Hands the files to the AirDrop sharing service, which shows its picker of
+    /// nearby devices. The picker is a window of ours, so the app comes forward for it.
+    @discardableResult
+    private static func send(_ urls: [URL]) -> Bool {
+        let files = urls.filter(\.isFileURL)
+        guard !files.isEmpty,
+              let service = NSSharingService(named: .sendViaAirDrop),
+              service.canPerform(withItems: files) else { return false }
+        NSApp.activate(ignoringOtherApps: true)
+        service.perform(withItems: files)
+        return true
+    }
+}
+
+/// The AirDrop mark — a dot inside three arcs open at the bottom — drawn to fit its
+/// frame in whatever foreground style is set, so it can be a blue tile in the
+/// dock and a grey one in the editor. There is no SF Symbol for it.
+struct AirDropGlyph: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            let stroke = side * 0.08
+            ZStack {
+                Circle()
+                    .fill(.foreground)
+                    .frame(width: side * 0.14, height: side * 0.14)
+                ForEach([0.42, 0.69, 0.96], id: \.self) { diameter in
+                    Circle()
+                        .trim(from: 0.12, to: 0.88)
+                        .stroke(.foreground, style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+                        .rotationEffect(.degrees(90))
+                        .frame(width: side * diameter - stroke, height: side * diameter - stroke)
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+
+    /// The glyph as a template image, for menus.
+    @MainActor
+    static let menuImage: NSImage? = templateImage(AirDropGlyph())
+}
+
+/// Lucide's `bot` (lucide.dev/icons/bot), for the agents: a head with an antenna,
+/// two eyes and an ear either side, drawn on its 24-unit grid with a 2-unit round
+/// stroke and scaled to fit, in whatever foreground style is set.
+struct BotGlyph: View {
+    var body: some View {
+        GeometryReader { geometry in
+            let side = min(geometry.size.width, geometry.size.height)
+            let unit = side / 24
+            let stroke = StrokeStyle(lineWidth: 2 * unit, lineCap: .round, lineJoin: .round)
+            ZStack {
+                Path { path in
+                    // Antenna: M12 8V4H8
+                    path.move(to: CGPoint(x: 12, y: 8))
+                    path.addLine(to: CGPoint(x: 12, y: 4))
+                    path.addLine(to: CGPoint(x: 8, y: 4))
+                    // Ears: M2 14h2, M20 14h2
+                    path.move(to: CGPoint(x: 2, y: 14)); path.addLine(to: CGPoint(x: 4, y: 14))
+                    path.move(to: CGPoint(x: 20, y: 14)); path.addLine(to: CGPoint(x: 22, y: 14))
+                    // Eyes: M15 13v2, M9 13v2
+                    path.move(to: CGPoint(x: 15, y: 13)); path.addLine(to: CGPoint(x: 15, y: 15))
+                    path.move(to: CGPoint(x: 9, y: 13)); path.addLine(to: CGPoint(x: 9, y: 15))
+                    // Head: rect 16×12 at (4, 8), rx 2
+                    path.addRoundedRect(in: CGRect(x: 4, y: 8, width: 16, height: 12), cornerSize: CGSize(width: 2, height: 2))
+                }
+                .applying(CGAffineTransform(scaleX: unit, y: unit))
+                .stroke(.foreground, style: stroke)
+            }
+            .frame(width: side, height: side)
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+
+    /// The glyph as a template image, for menus.
+    @MainActor
+    static let menuImage: NSImage? = templateImage(BotGlyph())
+}
+
+/// A view rendered as a 16 pt template image, for menus, which take images rather
+/// than views.
+@MainActor
+func templateImage<Content: View>(_ content: Content) -> NSImage? {
+    let renderer = ImageRenderer(content: content.foregroundStyle(.black).frame(width: 16, height: 16))
+    renderer.scale = 2
+    let image = renderer.nsImage
+    image?.isTemplate = true
+    return image
+}
+
+/// A widget kind's icon at a given size: its SF Symbol, or one of the marks drawn
+/// here, for the kinds that have none.
+struct WidgetKindIcon: View {
+    let kind: WidgetKind
+    var size: CGFloat = 13
+
+    var body: some View {
+        switch kind {
+        case .airDrop: AirDropGlyph().frame(width: size * 1.05, height: size * 1.05)
+        case .agents: BotGlyph().frame(width: size * 1.25, height: size * 1.25)
+        default: Image(systemName: kind.symbolName).font(.system(size: size))
+        }
+    }
+
+    /// The icon for a menu item, where only images will do.
+    @MainActor
+    static func menuImage(for kind: WidgetKind) -> NSImage? {
+        switch kind {
+        case .airDrop: return AirDropGlyph.menuImage
+        case .agents: return BotGlyph.menuImage
+        default: return nil
+        }
     }
 }
 
@@ -633,5 +790,374 @@ private struct ControlButtonStyle: ButtonStyle {
                     .fill(DockPalette.onSlab.opacity(configuration.isPressed ? 0.2 : (hovering ? 0.12 : 0)))
             )
             .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - AI usage
+
+/// What is left of the Claude and Copilot allowances: a card per service, each
+/// showing the tightest of its main windows as a number, a ring or a bar, opening
+/// into every window with its reset time. The monitor reads each service's own
+/// sign-in, so there is nothing to set up beyond ticking the services on the card.
+struct AIUsageWidget: View {
+    let tile: WidgetTile
+
+    @Environment(\.self) private var environment
+    @Environment(\.dockVertical) private var vertical
+    @ObservedObject private var monitor = AIUsageMonitor.shared
+
+    var body: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
+        layout {
+            if tile.usageServices.isEmpty {
+                VStack(spacing: 2) {
+                    Image(systemName: WidgetKind.aiUsage.symbolName)
+                        .font(.system(size: environment.scaled(18)))
+                    Text("Usage")
+                        .font(.system(size: environment.scaled(9), weight: .semibold))
+                }
+                .foregroundStyle(DockPalette.onSlab.opacity(0.6))
+                .widgetCard(square: vertical)
+                .dockTooltip("AI Usage", "Choose Claude or Copilot on the widget's card in the editor")
+            } else {
+                ForEach(tile.usageServices) { service in
+                    UsageServiceCard(tile: tile, service: service)
+                }
+            }
+        }
+        .onAppear { monitor.retain() }
+        .onDisappear { monitor.release() }
+    }
+}
+
+/// A ring filled clockwise from the top to the fraction, the way an Activity ring
+/// is: on a track of its own colour, brightening along the arc, with a soft glow
+/// of the colour behind it so it reads as lit rather than painted.
+struct UsageRing: View {
+    var fraction: Double
+    var color: Color
+    var lineWidth: CGFloat
+
+    private var clamped: Double { max(0, min(1, fraction)) }
+
+    /// The arc runs from a deeper shade at its start to a brighter one at its tip.
+    private var gradient: AngularGradient {
+        let base = NSColor(color)
+        let deep = Color(nsColor: base.blended(withFraction: 0.18, of: .black) ?? base)
+        let bright = Color(nsColor: base.blended(withFraction: 0.38, of: .white) ?? base)
+        return AngularGradient(
+            colors: [deep, color, bright],
+            center: .center,
+            startAngle: .degrees(0),
+            endAngle: .degrees(360 * clamped)
+        )
+    }
+
+    private var bright: Color {
+        let base = NSColor(color)
+        return Color(nsColor: base.blended(withFraction: 0.38, of: .white) ?? base)
+    }
+
+    var body: some View {
+        let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+        GeometryReader { geometry in
+            let radius = min(geometry.size.width, geometry.size.height) / 2
+            let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            // Where the arc ends, before the ring is turned to start at the top.
+            let angle = 2 * .pi * clamped
+            let tip = CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+            // As the arc comes round to meet its own start, the tip lies over it,
+            // with a shadow to say so — instead of the bright end meeting the deep
+            // start in a seam.
+            let closing = max(0, (clamped - 0.9) / 0.1)
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(0.18), lineWidth: lineWidth)
+                Circle()
+                    .trim(from: 0, to: clamped)
+                    .stroke(color.opacity(0.55), style: StrokeStyle(lineWidth: lineWidth * 1.5, lineCap: .round))
+                    .blur(radius: lineWidth * 0.9)
+                Circle()
+                    .trim(from: 0, to: clamped)
+                    .stroke(gradient, style: style)
+                // A hairline of light along the inside of the arc, for a little relief.
+                Circle()
+                    .trim(from: 0, to: clamped)
+                    .stroke(.white.opacity(0.35), style: StrokeStyle(lineWidth: lineWidth * 0.18, lineCap: .round))
+                    .padding(lineWidth * 0.32)
+                    .blendMode(.plusLighter)
+                if clamped > 0.02 {
+                    Circle()
+                        .fill(bright)
+                        .frame(width: lineWidth, height: lineWidth)
+                        .shadow(color: .black.opacity(0.45 * closing), radius: lineWidth * 0.35, x: lineWidth * 0.3, y: 0)
+                        .position(tip)
+                }
+            }
+            .rotationEffect(.degrees(-90))
+        }
+        .animation(.easeOut(duration: 0.5), value: clamped)
+    }
+}
+
+/// One service on a card. Blue while there is plenty left, orange under a quarter,
+/// red under a tenth; a dash while there is nothing to show.
+private struct UsageServiceCard: View {
+    let tile: WidgetTile
+    let service: UsageService
+
+    @Environment(\.self) private var environment
+    @Environment(\.dockVertical) private var vertical
+    @Environment(\.dockEdge) private var edge
+    @ObservedObject private var monitor = AIUsageMonitor.shared
+    /// The stack is keyed by widget; each card is a widget of its own to it.
+    @State private var stackID = UUID()
+
+    private var report: UsageReport? { monitor.reports[service] }
+    private var problem: UsageProblem? { monitor.problems[service] }
+    private var remaining: Double? { report?.lowestRemaining }
+
+    private var tint: Color {
+        guard let remaining else { return DockPalette.onSlab.opacity(0.35) }
+        if remaining <= 10 { return .red }
+        if remaining <= 25 { return .orange }
+        return Color(nsColor: .systemBlue)
+    }
+
+    private var percentText: String {
+        remaining.map { "\(Int($0.rounded()))" } ?? "–"
+    }
+
+    var body: some View {
+        CardButton(action: open) {
+            Group {
+                switch tile.usageLayout {
+                case .numbers: numbers
+                case .rings: rings
+                case .bars: bars
+                }
+            }
+            // Stale numbers fade a little while a refresh that failed is the latest word.
+            .opacity(problem != nil && report != nil ? 0.7 : 1)
+        }
+        .dockTooltip(tooltipTitle, tooltipDetail)
+        .contextMenu {
+            Button("Refresh") { monitor.refresh(service) }
+                .disabled(monitor.refreshing.contains(service))
+            Button("Open \(service.title) Usage Page") { NSWorkspace.shared.open(service.usagePage) }
+        }
+    }
+
+    // MARK: Layouts
+
+    /// The percentage large, the service under it.
+    private var numbers: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(percentText)
+                    .font(.system(size: environment.scaled(vertical ? 15 : 19), weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                if remaining != nil {
+                    Text("%")
+                        .font(.system(size: environment.scaled(vertical ? 8 : 10), weight: .semibold, design: .rounded))
+                        .foregroundStyle(DockPalette.onSlab.opacity(0.6))
+                }
+            }
+            .foregroundStyle(remaining == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
+            label(size: vertical ? 8 : 10)
+        }
+    }
+
+    /// A ring with the percentage inside, the service under it.
+    private var rings: some View {
+        let side = environment.scaled(vertical ? 26 : 34)
+        let lineWidth = side * 0.13
+        // The number stays clear of the ring: "100" shrinks to fit the inside.
+        let inside = side - lineWidth * 2 - side * 0.12
+        return VStack(spacing: environment.scaled(2)) {
+            UsageRing(fraction: (remaining ?? 0) / 100, color: tint, lineWidth: lineWidth)
+                .frame(width: side, height: side)
+                .overlay(
+                    VStack(spacing: -2) {
+                        Text(percentText)
+                            .font(.system(size: side * (vertical ? 0.42 : 0.36), weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                            .foregroundStyle(remaining == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
+                        if !vertical, remaining != nil {
+                            Text("%")
+                                .font(.system(size: side * 0.2, weight: .semibold, design: .rounded))
+                                .foregroundStyle(DockPalette.onSlab.opacity(0.55))
+                        }
+                    }
+                    .frame(width: inside)
+                )
+            label(size: vertical ? 8 : 9)
+        }
+    }
+
+    /// The service and percentage on one line, a bar under them.
+    private var bars: some View {
+        let width = environment.scaled(vertical ? 36 : 92)
+        let bar = Capsule()
+            .fill(DockPalette.onSlab.opacity(0.14))
+            .frame(width: width, height: environment.scaled(vertical ? 4 : 5))
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(tint)
+                    .frame(width: width * (remaining ?? 0) / 100)
+                    .animation(.easeOut(duration: 0.4), value: remaining)
+            }
+        return Group {
+            if vertical {
+                VStack(spacing: environment.scaled(3)) {
+                    Text(remaining.map { "\(Int($0.rounded()))%" } ?? "–")
+                        .font(.system(size: environment.scaled(11), weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                    bar
+                    label(size: 8)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: environment.scaled(4)) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(service.title)
+                            .font(.system(size: environment.scaled(12), weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text(remaining.map { "\(Int($0.rounded()))%" } ?? "–")
+                            .font(.system(size: environment.scaled(11), weight: .medium, design: .rounded))
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .foregroundStyle(DockPalette.onSlab.opacity(0.7))
+                    }
+                    .frame(width: width)
+                    bar
+                }
+            }
+        }
+    }
+
+    private func label(size: CGFloat) -> some View {
+        Text(service.title)
+            .font(.system(size: environment.scaled(size), weight: .semibold))
+            .foregroundStyle(DockPalette.onSlab.opacity(0.6))
+            .lineLimit(1)
+    }
+
+    // MARK: Tooltip
+
+    private var tooltipTitle: String {
+        if let remaining { return "\(service.title) — \(Int(remaining.rounded()))% left" }
+        return "\(service.title) — \(problem?.title ?? "Loading…")"
+    }
+
+    private var tooltipDetail: String {
+        if let report {
+            let windows = report.windows.filter(\.isPrimary)
+                .map { "\($0.title) \(Int($0.remaining.rounded()))%" }
+                .joined(separator: " · ")
+            if let problem { return "\(windows) · \(problem.hint(for: service))" }
+            return "\(windows) · click for details"
+        }
+        return problem?.hint(for: service) ?? "Reading \(service.title)'s usage"
+    }
+
+    // MARK: Stack
+
+    /// Every window with its reset, or what went wrong.
+    private func open() {
+        DockTooltipController.shared.cancel()
+        let now = Date()
+        var items: [DockStackItem] = []
+        if let report {
+            for window in report.windows {
+                var parts = ["\(Int(window.remaining.rounded()))% left"]
+                if let detail = window.detail { parts.append(detail) }
+                if let reset = Self.resetText(window, now: now) { parts.append(reset) }
+                items.append(DockStackItem(
+                    id: window.id,
+                    title: window.title,
+                    subtitle: parts.joined(separator: " · "),
+                    icon: .ring(window.remaining / 100, Self.tint(for: window.remaining)),
+                    action: { NSWorkspace.shared.open(service.usagePage) }
+                ))
+            }
+        }
+        if let problem {
+            items.append(DockStackItem(
+                id: "problem",
+                title: problem.title,
+                subtitle: problem.hint(for: service),
+                icon: .symbol("exclamationmark.triangle", .orange),
+                action: { AIUsageMonitor.shared.refresh(service) }
+            ))
+        }
+        var title = service.title
+        if let plan = report?.plan { title += " · \(Self.planTitle(plan))" }
+        if let fetched = report?.fetchedAt { title += " · updated \(Self.ago(fetched, now: now))" }
+        DockStackController.shared.toggle(
+            for: stackID,
+            content: DockStackContent(
+                title: title,
+                items: items,
+                style: .list,
+                emptyText: "Reading \(service.title)'s usage…",
+                footer: DockStackItem(
+                    id: "refresh",
+                    title: "Refresh",
+                    icon: .symbol("arrow.clockwise", DockPalette.onSlab),
+                    action: { AIUsageMonitor.shared.refresh(service) }
+                )
+            ),
+            edge: edge
+        )
+    }
+
+    private static func tint(for remaining: Double) -> Color {
+        if remaining <= 10 { return .red }
+        if remaining <= 25 { return .orange }
+        return Color(nsColor: .systemBlue)
+    }
+
+    /// "Resets Thu 12:10 PM · 2h 20m", or "Resets Oct 1 · 14d" for a day.
+    private static func resetText(_ window: UsageWindow, now: Date) -> String? {
+        guard let reset = window.resetsAt else { return nil }
+        let calendar = Calendar.current
+        let when: String
+        if window.resetsOnDay {
+            when = reset.formatted(.dateTime.month(.abbreviated).day())
+        } else if calendar.isDate(reset, inSameDayAs: now) {
+            when = reset.formatted(date: .omitted, time: .shortened)
+        } else {
+            when = reset.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        }
+        let seconds = max(0, reset.timeIntervalSince(now))
+        let countdown: String
+        if window.resetsOnDay {
+            let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: reset)).day ?? 0
+            countdown = days <= 0 ? "today" : "\(days)d"
+        } else if seconds >= 86_400 {
+            countdown = "\(Int(seconds / 86_400))d \(Int(seconds.truncatingRemainder(dividingBy: 86_400) / 3600))h"
+        } else if seconds >= 3600 {
+            countdown = "\(Int(seconds / 3600))h \(Int(seconds.truncatingRemainder(dividingBy: 3600) / 60))m"
+        } else {
+            countdown = "\(Int(seconds / 60))m"
+        }
+        return "resets \(when) · \(countdown)"
+    }
+
+    private static func ago(_ date: Date, now: Date) -> String {
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 60 { return "just now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m ago" }
+        return "\(Int(seconds / 3600))h ago"
+    }
+
+    /// "individual_pro" as GitHub sends it → "Pro".
+    private static func planTitle(_ plan: String) -> String {
+        plan.replacingOccurrences(of: "individual_", with: "")
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
     }
 }

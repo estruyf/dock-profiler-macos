@@ -208,7 +208,7 @@ struct ProfileEditorView: View {
             switch tab {
             case .items: itemsTab
             case .dock: dockTab
-            case .customDock: CustomDockOptionsView(options: $profile.customDock)
+            case .customDock: CustomDockOptionsView(options: $profile.customDock, tint: profile.color.color)
             case .desktop: DesktopOptionsView(options: $profile.desktop)
             }
         }
@@ -633,8 +633,7 @@ private struct WidgetItemCard: View {
                 .fill(Color.accentColor.opacity(0.12))
                 .frame(width: 28, height: 28)
                 .overlay(
-                    Image(systemName: widget.kind.symbolName)
-                        .font(.system(size: 12))
+                    WidgetKindIcon(kind: widget.kind, size: 12)
                         .foregroundStyle(Color.accentColor)
                 )
             VStack(alignment: .leading, spacing: 1) {

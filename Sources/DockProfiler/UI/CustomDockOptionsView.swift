@@ -4,6 +4,10 @@ import SwiftUI
 /// The custom-dock half of a profile: what it shows, where it sits, and its widgets.
 struct CustomDockOptionsView: View {
     @Binding var options: CustomDockOptions
+    /// The profile's colour, for the tinted look and its preview.
+    var tint: Color = .blue
+
+    @ObservedObject private var accessibility = AccessibilityDisplay.shared
 
     /// Width of the label column, so pickers and sliders line up down the form.
     private let labelWidth: CGFloat = 104
@@ -21,6 +25,7 @@ struct CustomDockOptionsView: View {
             Group {
                 section("Layout") { layoutSection }
                 section("Position") { positionSection }
+                section("Style") { styleSection }
                 section("Size") { sizeSection }
                 widgetsSection
             }
@@ -159,6 +164,67 @@ struct CustomDockOptionsView: View {
         }
     }
 
+    // MARK: - Style
+
+    private var styleSection: some View {
+        let hasPlate = options.look.style.hasPlate
+        return VStack(alignment: .leading, spacing: 8) {
+            row("Look") {
+                Picker("Look", selection: $options.look.style) {
+                    ForEach(DockStyle.available) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize()
+            }
+            indented {
+                caption(styleCaption)
+            }
+            row("Density") {
+                Picker("Density", selection: $options.look.density) {
+                    ForEach(DockDensity.allCases) { density in
+                        Text(density.title).tag(density)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 300)
+            }
+            indented {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Without a slab there is nothing to blur or tint, and the cards
+                    // are what hold a widget together.
+                    Toggle("Blur what is behind it", isOn: $options.look.translucent)
+                        .disabled(!hasPlate)
+                    if hasPlate, options.look.style == .liquidGlass, !options.look.translucent {
+                        caption("Clear glass: it still refracts what is behind it, without frosting it — dimmed a little so the tiles stay readable.")
+                    } else if hasPlate, !options.look.translucent {
+                        caption("Solid: nothing shows through.")
+                    }
+                    if hasPlate, accessibility.reducesTransparency {
+                        caption("Reduce transparency is on in System Settings → Accessibility, so the dock is drawn solid for now.")
+                    }
+                    Toggle("Tint with the profile's colour", isOn: $options.look.tinted)
+                        .disabled(!hasPlate)
+                    Toggle("Cards behind widgets", isOn: Binding(
+                        get: { options.look.drawsTileCards },
+                        set: { options.look.tileCards = $0 }
+                    ))
+                    .disabled(!hasPlate)
+                }
+            }
+        }
+    }
+
+    private var styleCaption: String {
+        if options.look.style == .liquidGlass, !DockStyle.supportsLiquidGlass {
+            return "Liquid Glass needs macOS Tahoe; on this Mac the dock follows the system instead."
+        }
+        return options.look.style.summary + "."
+    }
+
     // MARK: - Size
 
     private var sizeSection: some View {
@@ -220,7 +286,11 @@ struct CustomDockOptionsView: View {
                     Button {
                         options.widgets.append(WidgetTile(kind: kind))
                     } label: {
-                        Label(kind.title, systemImage: kind.symbolName)
+                        if let image = WidgetKindIcon.menuImage(for: kind) {
+                            Label { Text(kind.title) } icon: { Image(nsImage: image) }
+                        } else {
+                            Label(kind.title, systemImage: kind.symbolName)
+                        }
                     }
                 }
                 if group != Self.widgetGroups.last { Divider() }
@@ -247,11 +317,8 @@ struct CustomDockOptionsView: View {
     }
 
     private var cards: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 240), spacing: 10)],
-            alignment: .leading,
-            spacing: 10
-        ) {
+        // One card per line: two abreast left the settings on the wide cards cramped.
+        LazyVGrid(columns: [GridItem(.flexible())], alignment: .leading, spacing: 10) {
             ForEach(Array(options.widgets.enumerated()), id: \.element.id) { index, tile in
                 WidgetSettingsCard(tile: binding(for: tile.id)) {
                     options.widgets.removeAll { $0.id == tile.id }
@@ -281,6 +348,8 @@ struct CustomDockOptionsView: View {
             edge: options.edge,
             tileSize: options.tileSize,
             magnificationExtra: options.magnificationExtra,
+            look: options.look,
+            tint: tint,
             onReorder: { options.widgets = $0.compactMap(\.widget) }
         )
         return Group {
@@ -304,7 +373,7 @@ struct CustomDockOptionsView: View {
                 .foregroundStyle(.tertiary)
             Text(options.mode == .combined ? "No widgets among your apps yet" : "No widgets yet")
                 .font(.system(size: 13, weight: .medium))
-            Text("A clock, the Trash, a folder, a stack of apps, what is playing, your profiles or your coding agents.")
+            Text("A clock, the Trash, AirDrop, a folder, a stack of apps, what is playing, your profiles, your coding agents or your AI usage.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -324,8 +393,8 @@ struct CustomDockOptionsView: View {
     /// Glanceable things first, then the ones that open into something.
     private static let widgetGroups: [[WidgetKind]] = [
         [.clock, .date, .battery, .nowPlaying],
-        [.trash, .folderStack, .appStack],
-        [.profiles, .agents],
+        [.trash, .airDrop, .folderStack, .appStack],
+        [.profiles, .agents, .aiUsage],
     ]
 
     /// A binding to one widget by id, so a card's settings write straight back to the profile.
@@ -409,10 +478,7 @@ private struct WidgetSettingsCard: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Color.primary.opacity(0.06))
                     .frame(width: 28, height: 28)
-                    .overlay(
-                        Image(systemName: tile.kind.symbolName)
-                            .font(.system(size: 13))
-                    )
+                    .overlay(WidgetKindIcon(kind: tile.kind, size: 13))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(tile.title)
                         .font(.system(size: 13))
@@ -461,9 +527,50 @@ private struct WidgetSettingsCard: View {
         case .nowPlaying:
             Toggle("Show previous and next buttons", isOn: $tile.showsControls)
                 .controlSize(.small)
+        case .aiUsage:
+            usageSettings
         default:
             EmptyView()
         }
+    }
+
+    /// How the allowances are drawn, and which services to track.
+    private var usageSettings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Layout", selection: $tile.usageLayout) {
+                ForEach(UsageLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: 220)
+            HStack(spacing: 12) {
+                ForEach(UsageService.allCases) { service in
+                    Toggle(service.title, isOn: tracks(service))
+                        .controlSize(.small)
+                }
+            }
+            Text("Each tile shows the lowest remaining allowance in the main usage windows.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Ticking a service on puts it back in its usual place among the others.
+    private func tracks(_ service: UsageService) -> Binding<Bool> {
+        Binding(
+            get: { tile.usageServices.contains(service) },
+            set: { on in
+                if on {
+                    tile.usageServices = UsageService.allCases.filter { $0 == service || tile.usageServices.contains($0) }
+                } else {
+                    tile.usageServices.removeAll { $0 == service }
+                }
+            }
+        )
     }
 
     /// The apps in the stack as a row of icons — right-click one to take it out —

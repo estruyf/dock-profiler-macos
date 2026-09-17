@@ -5,6 +5,39 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **AI Usage widget.** What is left of your **Claude** and **GitHub Copilot**
+  allowances, a card per service, drawn as numbers, rings or bars — pick the
+  layout and the services on its card in the editor. Each card shows the
+  tightest of the service's main windows (Claude's 5-hour and weekly limits,
+  Copilot's premium requests for the month), turning orange under a quarter
+  and red under a tenth. Click a card for every window with its reset time
+  and countdown, Claude's per-model weekly limits included; refresh or open
+  the service's usage page from the context menu. Nothing to sign in to: it
+  reads Claude Code's token from the Keychain (`Claude Code-credentials`,
+  which macOS asks about once) and the Copilot extensions' token from
+  `~/.config/github-copilot`, and refreshes every five minutes while on
+  screen and when the Mac wakes. Tokens are only read, never refreshed, so
+  Claude Code stays signed in.
+- Stacks can show a ring beside an item, for what is left of an allowance.
+- **AirDrop widget.** Drop files on it and the AirDrop picker opens with them;
+  click it for Finder's AirDrop window.
+- **Dock looks.** The custom dock's slab can follow the system, as before; keep
+  a light or dark look whatever the system appearance — its tiles, tips and
+  stacks follow; be drawn as **Liquid Glass** on macOS Tahoe; or go away
+  altogether, leaving each widget on its own card. The slab can blur what is
+  behind it or be solid — clear, for Liquid Glass — and is solid while macOS's
+  Reduce transparency is on; it can
+  take a wash of the profile's colour, drop the cards behind widgets, and pack
+  its tiles at one of three densities. All on the profile's Custom Dock tab.
+  Liquid Glass and transparent docks read the wallpaper under them and go
+  light or dark to suit it, as the Tahoe Dock does, so white tiles never sit
+  on a white desktop; clear glass is dimmed a little towards the slab's shade,
+  so its tiles read over a window of any colour too.
+
 ## [1.2.0] - 2026-09-17
 
 ### Added

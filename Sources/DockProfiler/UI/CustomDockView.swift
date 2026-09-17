@@ -13,6 +13,11 @@ private struct DockVerticalKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// Whether widgets draw a card behind themselves.
+private struct DockTileCardsKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     var dockTileSize: CGFloat {
         get { self[DockTileSizeKey.self] }
@@ -22,6 +27,11 @@ extension EnvironmentValues {
     var dockVertical: Bool {
         get { self[DockVerticalKey.self] }
         set { self[DockVerticalKey.self] = newValue }
+    }
+
+    var dockTileCards: Bool {
+        get { self[DockTileCardsKey.self] }
+        set { self[DockTileCardsKey.self] = newValue }
     }
 }
 
@@ -38,6 +48,9 @@ struct CustomDockView: View {
     var tileSize: CGFloat = 56
     /// How much a tile under the pointer grows, in points; zero for no magnification.
     var magnificationExtra: CGFloat = 0
+    var look = DockLook()
+    /// The profile's colour, washed over the slab when the look asks for it.
+    var tint: Color? = nil
     /// Called with the new order when an item is dragged to a new place, as the
     /// Dock's own tiles can be. Without it the items stay put.
     var onReorder: (([DockStripItem]) -> Void)? = nil
@@ -55,13 +68,20 @@ struct CustomDockView: View {
     /// The order as the drag has it so far; kept after the drop until `items` catches up.
     @State private var pendingOrder: [DockStripItem]?
 
+    @Environment(\.colorScheme) private var systemColorScheme
+    @ObservedObject private var accessibility = AccessibilityDisplay.shared
+
     private var vertical: Bool { edge.isVertical }
+    private var style: DockStyle { look.style }
+    /// The slab's inset and the gap between tiles; a column sits a little tighter.
+    private var padding: CGFloat { look.density.padding * (vertical ? 0.75 : 1) }
+    private var cornerRadius: CGFloat { padding + 10 }
     private var displayedItems: [DockStripItem] { pendingOrder ?? items }
     /// Each item's centre along the axis.
     private var centers: [UUID: CGFloat] { frames.mapValues { vertical ? $0.midY : $0.midX } }
 
     var body: some View {
-        let spacing: CGFloat = vertical ? 6 : 8
+        let spacing = padding
         let layout = vertical ? AnyLayout(VStackLayout(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))
         layout {
             ForEach(displayedItems) { item in
@@ -83,13 +103,14 @@ struct CustomDockView: View {
                 }
             }
         }
-        .padding(vertical ? 6 : 8)
-        .background(DockMaterial(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(DockPalette.rim, lineWidth: 1)
-        )
+        .padding(padding)
+        .background(plate)
         .overlay(ghost)
+        // A forced light or dark style colours the tiles and cards too, not just the
+        // slab. The panel sets the same appearance on its window; this covers the
+        // preview in the editor, whose window keeps the system's.
+        .environment(\.colorScheme, style.forcedColorScheme ?? systemColorScheme)
+        .environment(\.dockTileCards, look.drawsTileCards)
         .coordinateSpace(name: "dock")
         .onContinuousHover(coordinateSpace: .named("dock")) { phase in
             guard magnificationExtra > 0, dragging == nil else { return }
@@ -103,6 +124,38 @@ struct CustomDockView: View {
         .environment(\.dockTileSize, tileSize)
         .environment(\.dockVertical, vertical)
         .environment(\.dockEdge, edge)
+    }
+
+    /// The slab behind the tiles: blurred, glass or solid, with the profile's colour
+    /// washed over it if asked, and a hairline rim — except on glass, which draws its
+    /// own edge. Nothing at all when the look is transparent.
+    @ViewBuilder
+    private var plate: some View {
+        if style.hasPlate {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            let glass = DockMaterial.drawsGlass(style)
+            // Blur off means a solid slab — except for glass, which goes clear instead.
+            let solid = accessibility.reducesTransparency || (!look.translucent && !glass)
+            ZStack {
+                if solid {
+                    shape.fill(DockPalette.solid)
+                } else {
+                    // Glass and blur are different views; a new style makes a new one.
+                    DockMaterial(style: style, cornerRadius: cornerRadius, frosted: look.translucent)
+                        .id(style)
+                }
+                // Clear glass is the colour of whatever is behind it — white over a
+                // white window, where white tiles vanish. It needs a dimming layer, as
+                // Apple advises, so the tiles read over anything.
+                if glass, !solid, !look.translucent {
+                    shape.fill(DockPalette.glassDim)
+                }
+                if look.tinted, let tint {
+                    shape.fill(tint.opacity(0.28))
+                }
+                shape.strokeBorder(DockPalette.rim, lineWidth: glass && !solid ? 0 : 1)
+            }
+        }
     }
 
     private func magnify(_ id: UUID) -> Magnify {
@@ -409,8 +462,10 @@ struct WidgetTileView: View {
             case .nowPlaying: NowPlayingWidget(tile: tile)
             case .profiles: ProfilesWidget(tile: tile)
             case .trash: TrashWidget(tile: tile)
+            case .airDrop: AirDropWidget(tile: tile)
             case .folderStack: FolderStackWidget(tile: tile)
             case .appStack: AppStackWidget(tile: tile)
+            case .aiUsage: AIUsageWidget(tile: tile)
             }
         }
         .foregroundStyle(DockPalette.onSlab)
@@ -427,6 +482,7 @@ struct WidgetCard: ViewModifier {
 
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockVertical) private var vertical
+    @Environment(\.dockTileCards) private var cards
 
     func body(content: Content) -> some View {
         content
@@ -438,9 +494,10 @@ struct WidgetCard: ViewModifier {
             // the panel proposes, the row overflows as a whole rather than squeezing
             // the cards until their content spills out.
             .fixedSize(horizontal: !vertical && !square, vertical: false)
+            // Without cards the widget keeps its footprint, so nothing shifts.
             .background(
                 RoundedRectangle(cornerRadius: size * 0.21, style: .continuous)
-                    .fill(DockPalette.onSlab.opacity(0.10))
+                    .fill(DockPalette.onSlab.opacity(cards ? 0.10 : 0))
             )
     }
 }
@@ -711,23 +768,82 @@ struct StatusDot: View {
 // MARK: - Material
 
 /// The blur behind the dock. A SwiftUI material would do inside a normal window,
-/// but in a clear, borderless panel the blur has to come from AppKit.
+/// but in a clear, borderless panel the blur has to come from AppKit: a visual
+/// effect view for the glass styles, or Liquid Glass itself on Tahoe. The view
+/// carries the style's appearance, so a light dock stays light in Dark Mode.
 struct DockMaterial: NSViewRepresentable {
+    var style: DockStyle = .system
     let cornerRadius: CGFloat
+    /// Frosted glass blurs what is behind it; clear glass only refracts it. The
+    /// blur styles ignore this — turning blur off makes them solid, not clear.
+    var frosted = true
 
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .hudWindow
-        view.blendingMode = .behindWindow
-        view.state = .active
+    /// Whether the style is drawn as Liquid Glass on this Mac.
+    static func drawsGlass(_ style: DockStyle) -> Bool {
+        style == .liquidGlass && DockStyle.supportsLiquidGlass
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        let view: NSView
+        #if compiler(>=6.2)
+        if #available(macOS 26, *), style == .liquidGlass {
+            let glass = NSGlassEffectView()
+            glass.cornerRadius = cornerRadius
+            glass.style = frosted ? .regular : .clear
+            view = glass
+        } else {
+            view = Self.effectView()
+        }
+        #else
+        view = Self.effectView()
+        #endif
         view.wantsLayer = true
         view.layer?.cornerRadius = cornerRadius
         view.layer?.cornerCurve = .continuous
         view.layer?.masksToBounds = true
+        view.appearance = style.forcedAppearance
         return view
     }
 
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+    func updateNSView(_ view: NSView, context: Context) {
         view.layer?.cornerRadius = cornerRadius
+        view.appearance = style.forcedAppearance
+        #if compiler(>=6.2)
+        if #available(macOS 26, *), let glass = view as? NSGlassEffectView {
+            glass.cornerRadius = cornerRadius
+            glass.style = frosted ? .regular : .clear
+        }
+        #endif
+    }
+
+    private static func effectView() -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+}
+
+/// macOS's Reduce transparency setting, so a blurred dock goes solid with the rest
+/// of the system — and comes back when it is turned off again.
+@MainActor
+final class AccessibilityDisplay: ObservableObject {
+    static let shared = AccessibilityDisplay()
+
+    @Published private(set) var reducesTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+
+    private var token: NSObjectProtocol?
+
+    private init() {
+        token = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.reducesTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            }
+        }
     }
 }

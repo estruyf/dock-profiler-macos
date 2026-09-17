@@ -149,6 +149,19 @@ enum DockPalette {
         light: NSColor(calibratedWhite: 0.82, alpha: 0.95)
     )
 
+    /// The slab with no blur behind it: for Reduce transparency, or by choice.
+    static let solid = dynamic(
+        dark: NSColor(calibratedWhite: 0.19, alpha: 1),
+        light: NSColor(calibratedWhite: 0.88, alpha: 1)
+    )
+
+    /// The dimming layer over clear Liquid Glass: towards the slab's own shade,
+    /// enough that the tiles read over whatever is behind, still seen through.
+    static let glassDim = dynamic(
+        dark: NSColor(calibratedWhite: 0.0, alpha: 0.5),
+        light: NSColor(calibratedWhite: 1.0, alpha: 0.5)
+    )
+
     static let rim = dynamic(
         dark: NSColor(calibratedWhite: 1.0, alpha: 0.16),
         light: NSColor(calibratedWhite: 0.0, alpha: 0.12)

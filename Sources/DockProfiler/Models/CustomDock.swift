@@ -1,4 +1,5 @@
-import Foundation
+import AppKit
+import SwiftUI
 
 /// A widget in Dock Profiler's own dock. The macOS Dock has no extension point —
 /// `persistent-apps` only takes files, folders, links and spacers — so widgets are
@@ -11,8 +12,10 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     case nowPlaying
     case profiles
     case trash
+    case airDrop
     case folderStack
     case appStack
+    case aiUsage
 
     var id: String { rawValue }
 
@@ -25,8 +28,10 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .nowPlaying: return "Now Playing"
         case .profiles: return "Profiles"
         case .trash: return "Trash"
+        case .airDrop: return "AirDrop"
         case .folderStack: return "Folder"
         case .appStack: return "App Stack"
+        case .aiUsage: return "AI Usage"
         }
     }
 
@@ -35,12 +40,14 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .clock: return "clock"
         case .date: return "calendar"
         case .battery: return "battery.75percent"
-        case .agents: return "sparkles.rectangle.stack"
+        case .agents: return "sparkles.rectangle.stack"  // drawn as Lucide's bot in the UI; see BotGlyph
         case .nowPlaying: return "music.note"
         case .profiles: return "square.grid.2x2"
         case .trash: return "trash"
+        case .airDrop: return "dot.radiowaves.up.forward"
         case .folderStack: return "folder"
         case .appStack: return "square.stack.3d.up"
+        case .aiUsage: return "gauge.with.dots.needle.33percent"
         }
     }
 
@@ -53,16 +60,67 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .nowPlaying: return "Music or Spotify"
         case .profiles: return "Switch Dock Profiler profiles"
         case .trash: return "The Trash, with files dropped on it"
+        case .airDrop: return "Send files dropped on it to a nearby device"
         case .folderStack: return "A folder that opens into its files"
         case .appStack: return "Apps folded into one tile"
+        case .aiUsage: return "What is left of your Claude and Copilot allowances"
         }
     }
 
     /// Widgets that carry settings of their own, shown on their card in the editor.
     var isConfigurable: Bool {
         switch self {
-        case .folderStack, .appStack, .agents, .nowPlaying: return true
+        case .folderStack, .appStack, .agents, .nowPlaying, .aiUsage: return true
         default: return false
+        }
+    }
+}
+
+/// The services the AI Usage widget can track. Each is read the way its own tools
+/// leave it on this Mac — no signing in to Dock Profiler itself.
+enum UsageService: String, Codable, CaseIterable, Identifiable {
+    case claude
+    case copilot
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .claude: return "Claude"
+        case .copilot: return "Copilot"
+        }
+    }
+
+    /// Where the full picture lives on the web.
+    var usagePage: URL {
+        switch self {
+        case .claude: return URL(string: "https://claude.ai/settings/usage")!
+        case .copilot: return URL(string: "https://github.com/settings/copilot/features")!
+        }
+    }
+
+    /// What signing in means for this service, for the empty state.
+    var signInHint: String {
+        switch self {
+        case .claude: return "Sign in to Claude Code in a terminal; its token is read from the Keychain"
+        case .copilot: return "Sign in to GitHub Copilot in VS Code or Xcode; its token is read from ~/.config/github-copilot"
+        }
+    }
+}
+
+/// How the AI Usage widget draws each service's remaining allowance.
+enum UsageLayout: String, Codable, CaseIterable, Identifiable {
+    case numbers
+    case rings
+    case bars
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .numbers: return "Numbers"
+        case .rings: return "Rings"
+        case .bars: return "Bars"
         }
     }
 }
@@ -93,6 +151,9 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     var stacked: Bool = false
     /// Now playing: previous and next buttons beside the track.
     var showsControls: Bool = false
+    /// AI usage: how the allowances are drawn, and which services are tracked, in order.
+    var usageLayout: UsageLayout = .rings
+    var usageServices: [UsageService] = UsageService.allCases
 
     init(kind: WidgetKind, anchor: WidgetAnchor = .end) {
         self.kind = kind
@@ -121,6 +182,11 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             return stacked ? "One tile that opens into the sessions" : kind.summary
         case .nowPlaying:
             return showsControls ? "Music or Spotify, with skip buttons" : kind.summary
+        case .aiUsage:
+            guard !usageServices.isEmpty else { return "Nothing tracked yet" }
+            let names = usageServices.map(\.title)
+            let tracked = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+            return "\(tracked), as \(usageLayout.title.lowercased())"
         default:
             return kind.summary
         }
@@ -128,7 +194,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
 
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, anchor, path, apps, stacked, showsControls
+        case id, kind, anchor, path, apps, stacked, showsControls, usageLayout, usageServices
     }
 
     init(from decoder: Decoder) throws {
@@ -140,6 +206,8 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         apps = try container.decodeIfPresent([DockTile].self, forKey: .apps) ?? []
         stacked = try container.decodeIfPresent(Bool.self, forKey: .stacked) ?? false
         showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls) ?? false
+        usageLayout = try container.decodeIfPresent(UsageLayout.self, forKey: .usageLayout) ?? .rings
+        usageServices = try container.decodeIfPresent([UsageService].self, forKey: .usageServices) ?? UsageService.allCases
     }
 }
 
@@ -192,6 +260,137 @@ enum DockStripAlignment: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the slab is drawn: the material behind the tiles, and whether the dock
+/// keeps its own appearance regardless of the system's.
+enum DockStyle: String, Codable, CaseIterable, Identifiable {
+    /// The Dock's own look: translucent, light in Light Mode and dark in Dark Mode.
+    case system
+    case light
+    case dark
+    /// macOS Tahoe's glass, refracting what is behind it. Drawn as `system` before it.
+    case liquidGlass
+    /// No slab at all: the tiles sit straight on the desktop, each widget on its own card.
+    case transparent
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: return "Follow the system"
+        case .light: return "Light glass"
+        case .dark: return "Dark glass"
+        case .liquidGlass: return "Liquid Glass"
+        case .transparent: return "Transparent"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .system: return "Light or dark with the rest of the Mac, as the Dock is"
+        case .light: return "Light, whatever the system appearance"
+        case .dark: return "Dark, whatever the system appearance"
+        case .liquidGlass: return "Refracts what is behind it, light or dark to suit the wallpaper, like the Tahoe Dock"
+        case .transparent: return "No slab — the tiles sit straight on the desktop, light or dark to suit the wallpaper, each widget on its own card"
+        }
+    }
+
+    /// Whether there is a slab behind the tiles at all.
+    var hasPlate: Bool { self != .transparent }
+
+    /// The appearance forced on the dock's windows — nil to follow the system.
+    var forcedAppearance: NSAppearance? {
+        switch self {
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        case .system, .liquidGlass, .transparent: return nil
+        }
+    }
+
+    /// The SwiftUI side of `forcedAppearance`, for the preview in the editor.
+    var forcedColorScheme: ColorScheme? {
+        switch self {
+        case .light: return .light
+        case .dark: return .dark
+        case .system, .liquidGlass, .transparent: return nil
+        }
+    }
+
+    /// Whether the desktop shows through enough that the tiles read against it
+    /// rather than against a slab: glass, or no slab at all. The dock then takes
+    /// its appearance from the desktop picture, as the Tahoe Dock does.
+    var showsDesktop: Bool {
+        switch self {
+        case .liquidGlass: return Self.supportsLiquidGlass
+        case .transparent: return true
+        case .system, .light, .dark: return false
+        }
+    }
+
+    /// Whether this Mac can draw Liquid Glass.
+    static var supportsLiquidGlass: Bool {
+        if #available(macOS 26, *) { return true }
+        return false
+    }
+
+    /// The styles worth offering here: Liquid Glass only where it can be drawn.
+    static var available: [DockStyle] {
+        allCases.filter { $0 != .liquidGlass || supportsLiquidGlass }
+    }
+}
+
+/// How much room the slab leaves around and between its tiles. The corner radius
+/// follows, so a tighter dock is also a squarer one.
+enum DockDensity: String, Codable, CaseIterable, Identifiable {
+    case compact, regular, roomy
+
+    var id: String { rawValue }
+
+    var title: String { rawValue.capitalized }
+
+    /// The slab's inset around the tiles, and the gap between them, in points.
+    var padding: CGFloat {
+        switch self {
+        case .compact: return 4
+        case .regular: return 8
+        case .roomy: return 12
+        }
+    }
+}
+
+/// The slab's look: its style, whether it blurs what is behind it, whether it takes
+/// the profile's colour, whether widgets get cards, and how tightly it is packed.
+struct DockLook: Codable, Hashable {
+    var style: DockStyle = .system
+    /// Blur what is behind the slab; off draws it solid — or, for Liquid Glass,
+    /// clear. Solid regardless while macOS's Reduce transparency is on.
+    var translucent: Bool = true
+    /// A wash of the profile's colour over the slab, so each profile's dock is its own.
+    var tinted: Bool = false
+    /// A card behind each widget, as the Dock's tiles have. Always on without a slab.
+    var tileCards: Bool = true
+    var density: DockDensity = .regular
+
+    init() {}
+
+    // Fields added in later versions are missing from earlier files.
+    private enum CodingKeys: String, CodingKey {
+        case style, translucent, tinted, tileCards, density
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = DockLook()
+        style = try container.decodeIfPresent(DockStyle.self, forKey: .style) ?? defaults.style
+        translucent = try container.decodeIfPresent(Bool.self, forKey: .translucent) ?? defaults.translucent
+        tinted = try container.decodeIfPresent(Bool.self, forKey: .tinted) ?? defaults.tinted
+        tileCards = try container.decodeIfPresent(Bool.self, forKey: .tileCards) ?? defaults.tileCards
+        density = try container.decodeIfPresent(DockDensity.self, forKey: .density) ?? defaults.density
+    }
+
+    /// Cards are what hold a widget together once there is no slab.
+    var drawsTileCards: Bool { tileCards || !style.hasPlate }
+}
+
 /// The optional custom-dock half of a profile. When `enabled` is false — or the
 /// dock would be empty — activating the profile takes the panel away.
 struct CustomDockOptions: Codable, Hashable {
@@ -210,6 +409,7 @@ struct CustomDockOptions: Codable, Hashable {
     var magnifiedSize: Double = 84
     /// Apps that are running but not pinned, after the pinned ones — as the Dock does.
     var showsRunningApps: Bool = false
+    var look = DockLook()
     var widgets: [WidgetTile] = []
 
     var isCombined: Bool { enabled && mode == .combined }
@@ -329,7 +529,7 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, widgets
+        case enabled, mode, edge, alignment, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, look, widgets
     }
 
     init(from decoder: Decoder) throws {
@@ -345,6 +545,7 @@ extension CustomDockOptions {
         magnification = try container.decodeIfPresent(Bool.self, forKey: .magnification) ?? defaults.magnification
         magnifiedSize = try container.decodeIfPresent(Double.self, forKey: .magnifiedSize) ?? defaults.magnifiedSize
         showsRunningApps = try container.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? defaults.showsRunningApps
+        look = try container.decodeIfPresent(DockLook.self, forKey: .look) ?? defaults.look
         widgets = try container.decodeIfPresent([WidgetTile].self, forKey: .widgets) ?? defaults.widgets
     }
 }

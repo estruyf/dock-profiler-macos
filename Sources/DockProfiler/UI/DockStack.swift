@@ -7,6 +7,8 @@ struct DockStackItem: Identifiable {
         case image(NSImage)
         case symbol(String, Color)
         case dot(Color)
+        /// A ring filled to the fraction, for what is left of an allowance.
+        case ring(Double, Color)
     }
 
     var id: String
@@ -82,6 +84,8 @@ final class DockStackController {
         let mouse = NSEvent.mouseLocation
         let window = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0))
         let dock = window.flatMap { CustomDockWindowController.shared.slabFrame(in: $0) ?? $0.frame }
+        let fromDock = window.map { CustomDockWindowController.shared.slabFrame(in: $0) != nil } ?? false
+        panel.appearance = fromDock ? CustomDockWindowController.shared.forcedAppearance : nil
         let gap: CGFloat = 5
         let reach: CGFloat = 48
         var origin: NSPoint
@@ -353,6 +357,10 @@ struct DockStackView: View {
             Circle()
                 .fill(color)
                 .frame(width: size * 0.45, height: size * 0.45)
+                .frame(width: size, height: size)
+        case .ring(let fraction, let color):
+            UsageRing(fraction: fraction, color: color, lineWidth: size * 0.14)
+                .frame(width: size * 0.8, height: size * 0.8)
                 .frame(width: size, height: size)
         }
     }

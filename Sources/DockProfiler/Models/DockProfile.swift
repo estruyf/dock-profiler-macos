@@ -65,11 +65,26 @@ struct DockProfile: Codable, Identifiable, Hashable {
     var managesOthers: Bool = false
     var appearance: DockAppearance = DockAppearance()
     var desktop: DesktopOptions = DesktopOptions()
+    var customDock: CustomDockOptions = CustomDockOptions()
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
     func tiles(in section: DockSection) -> [DockTile] {
         section == .apps ? apps : others
+    }
+
+    /// The app row as the editor and the custom dock show it: with the widgets
+    /// in among the apps when the dock is combined, apps alone otherwise.
+    var appRow: [DockStripItem] {
+        customDock.isCombined ? customDock.merged(with: apps) : apps.map { .tile($0) }
+    }
+
+    /// Takes a rearranged app row back: apps in their new order, widgets re-anchored.
+    mutating func setAppRow(_ row: [DockStripItem]) {
+        apps = row.compactMap(\.tile)
+        if customDock.isCombined {
+            customDock.widgets = CustomDockOptions.widgets(from: row)
+        }
     }
 
     var itemSummary: String {
@@ -79,11 +94,68 @@ struct DockProfile: Codable, Identifiable, Hashable {
             summary += " · \(others.count) item\(others.count == 1 ? "" : "s")"
         }
         if let desktop = desktop.summary { summary += " · \(desktop)" }
+        if let dock = customDock.summary { summary += " · \(dock)" }
         return summary
     }
 
     static func empty(named name: String = "New Profile") -> DockProfile {
         DockProfile(name: name)
+    }
+}
+
+extension DockProfile {
+    private enum CodingKeys: String, CodingKey {
+        case id, name, color, symbol, apps, others, managesOthers, appearance, desktop, customDock
+        case createdAt, updatedAt
+    }
+
+    /// Profiles saved by an older version lack the keys added since, so anything
+    /// optional falls back to its default instead of failing the whole store.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        color = try container.decodeIfPresent(ProfileColor.self, forKey: .color) ?? .blue
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol) ?? "square.grid.2x2"
+        apps = try container.decodeIfPresent([DockTile].self, forKey: .apps) ?? []
+        others = try container.decodeIfPresent([DockTile].self, forKey: .others) ?? []
+        managesOthers = try container.decodeIfPresent(Bool.self, forKey: .managesOthers) ?? false
+        appearance = try container.decodeIfPresent(DockAppearance.self, forKey: .appearance) ?? DockAppearance()
+        desktop = try container.decodeIfPresent(DesktopOptions.self, forKey: .desktop) ?? DesktopOptions()
+        customDock = try container.decodeIfPresent(CustomDockOptions.self, forKey: .customDock) ?? CustomDockOptions()
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+    }
+}
+
+extension DockAppearance {
+    private enum CodingKeys: String, CodingKey {
+        case enabled, orientation, tileSize, magnification, largeSize, autohide, showRecents, minimizeIntoIcon
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = DockAppearance()
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
+        orientation = try container.decodeIfPresent(DockOrientation.self, forKey: .orientation) ?? defaults.orientation
+        tileSize = try container.decodeIfPresent(Double.self, forKey: .tileSize) ?? defaults.tileSize
+        magnification = try container.decodeIfPresent(Bool.self, forKey: .magnification) ?? defaults.magnification
+        largeSize = try container.decodeIfPresent(Double.self, forKey: .largeSize) ?? defaults.largeSize
+        autohide = try container.decodeIfPresent(Bool.self, forKey: .autohide) ?? defaults.autohide
+        showRecents = try container.decodeIfPresent(Bool.self, forKey: .showRecents) ?? defaults.showRecents
+        minimizeIntoIcon = try container.decodeIfPresent(Bool.self, forKey: .minimizeIntoIcon) ?? defaults.minimizeIntoIcon
+    }
+}
+
+extension DesktopOptions {
+    private enum CodingKeys: String, CodingKey { case setsWallpaper, wallpaperPath, wallpaperAllScreens }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = DesktopOptions()
+        setsWallpaper = try container.decodeIfPresent(Bool.self, forKey: .setsWallpaper) ?? defaults.setsWallpaper
+        wallpaperPath = try container.decodeIfPresent(String.self, forKey: .wallpaperPath)
+        wallpaperAllScreens = try container.decodeIfPresent(Bool.self, forKey: .wallpaperAllScreens) ?? defaults.wallpaperAllScreens
     }
 }
 

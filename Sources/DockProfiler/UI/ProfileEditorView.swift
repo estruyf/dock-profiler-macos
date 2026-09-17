@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum EditorTab: String, CaseIterable, Identifiable {
-    case items, dock, desktop
+    case items, dock, customDock, desktop
 
     var id: String { rawValue }
 
@@ -11,6 +11,7 @@ private enum EditorTab: String, CaseIterable, Identifiable {
         switch self {
         case .items: return "Items"
         case .dock: return "Dock"
+        case .customDock: return "Custom Dock"
         case .desktop: return "Desktop"
         }
     }
@@ -22,6 +23,12 @@ struct ProfileEditorView: View {
 
     @State private var tab: EditorTab = .items
     @State private var section: DockSection = .apps
+    // Reordering in the Items list
+    @State private var draggingCard: UUID?
+    @State private var dragPoint: CGPoint = .zero
+    @State private var cardFrames: [UUID: CGRect] = [:]
+    /// The order as the drag has it so far; kept after the drop until the row catches up.
+    @State private var pendingRow: [DockStripItem]?
     @State private var selection: UUID?
     @State private var keyMonitor: Any?
     @State private var showingIdentity = false
@@ -78,6 +85,10 @@ struct ProfileEditorView: View {
         if profile.appearance.enabled {
             text = text + Text(", applies your ") + Text("Dock settings").bold()
         }
+        if profile.customDock.isActive {
+            text = text + Text(", shows its ")
+                + Text(profile.customDock.mode == .combined ? "custom dock" : "widgets").bold()
+        }
         if profile.desktop.setsWallpaper, profile.desktop.wallpaperPath != nil {
             text = text + Text(" and sets its ") + Text("wallpaper").bold()
         }
@@ -97,18 +108,31 @@ struct ProfileEditorView: View {
 
     // MARK: - Dock preview
 
-    private var tilesBinding: Binding<[DockTile]> {
+    /// The row on show: apps (with the widgets among them when the custom dock is
+    /// combined) or the folders side. Writing it back reorders, adds and removes.
+    private var rowBinding: Binding<[DockStripItem]> {
         Binding(
-            get: { section == .apps ? profile.apps : profile.others },
-            set: { if section == .apps { profile.apps = $0 } else { profile.others = $0 } }
+            get: { section == .apps ? profile.appRow : profile.others.map { .tile($0) } },
+            set: { row in
+                if section == .apps {
+                    profile.setAppRow(row)
+                } else {
+                    profile.others = row.compactMap(\.tile)
+                }
+            }
         )
     }
 
-    private var tiles: [DockTile] { tilesBinding.wrappedValue }
+    private var row: [DockStripItem] { rowBinding.wrappedValue }
+    private var tiles: [DockTile] { row.compactMap(\.tile) }
+
+    /// What the Items list shows: the row — with a combined custom dock, widgets in
+    /// among the apps as the dock has them — in the order a drag in progress has it.
+    private var listedItems: [DockStripItem] { pendingRow ?? row }
 
     private var dockPreview: some View {
         DockPreviewStrip(
-            tiles: tilesBinding,
+            items: rowBinding,
             selection: $selection,
             onAdd: addFromPanel,
             onDropURLs: add
@@ -117,12 +141,16 @@ struct ProfileEditorView: View {
 
     private var hintRow: some View {
         HStack {
-            Text("Drag to reorder · right-click or ⌫ to remove · drop an app from Finder to add")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+            Text(
+                profile.customDock.isCombined && section == .apps
+                    ? "Drag apps and widgets to arrange your custom dock · right-click or ⌫ to remove · drop an app from Finder to add"
+                    : "Drag to reorder · right-click or ⌫ to remove · drop an app from Finder to add"
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
             Spacer()
-            if let tile = tiles.first(where: { $0.id == selection }) {
-                Text(tile.label).font(.system(size: 12, weight: .medium))
+            if let item = row.first(where: { $0.id == selection }) {
+                Text(item.tile?.label ?? item.widget?.kind.title ?? "").font(.system(size: 12, weight: .medium))
                     + Text(" selected").font(.system(size: 12)).foregroundColor(.secondary)
             }
         }
@@ -146,6 +174,8 @@ struct ProfileEditorView: View {
                                 .foregroundStyle(.secondary)
                         case .dock:
                             dot(profile.appearance.enabled ? Color.secondary : .clear)
+                        case .customDock:
+                            dot(profile.customDock.isActive ? Color.accentColor : .clear)
                         case .desktop:
                             dot(profile.desktop.isActive ? Color.accentColor : .clear)
                         }
@@ -178,6 +208,7 @@ struct ProfileEditorView: View {
             switch tab {
             case .items: itemsTab
             case .dock: dockTab
+            case .customDock: CustomDockOptionsView(options: $profile.customDock)
             case .desktop: DesktopOptionsView(options: $profile.desktop)
             }
         }
@@ -204,8 +235,21 @@ struct ProfileEditorView: View {
                     label: profile.managesOthers ? "Folders & files · \(profile.others.count)" : "Folders & files · off"
                 )
                 Spacer()
-                Button(action: addFromPanel) {
-                    Text(section == .apps ? "Add app…" : "Add folder…")
+                if section == .apps {
+                    // Click adds from a file panel; the arrow offers Finder, which lives
+                    // in CoreServices where nobody goes looking, at the front as the
+                    // Dock has it.
+                    Menu {
+                        Button("Finder") { addFinder() }
+                            .disabled(profile.apps.contains { $0.isFinder })
+                    } label: {
+                        Text("Add app…")
+                    } primaryAction: {
+                        addFromPanel()
+                    }
+                    .fixedSize()
+                } else {
+                    Button("Add folder…", action: addFromPanel)
                 }
                 if section == .apps {
                     Menu("Add spacer") {
@@ -226,24 +270,104 @@ struct ProfileEditorView: View {
             } else if tiles.isEmpty {
                 emptyItemsState
             } else {
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 200), spacing: 10)],
-                    alignment: .leading,
-                    spacing: 10
-                ) {
-                    ForEach(tiles) { tile in
-                        ItemCard(tile: tile, isSelected: selection == tile.id)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selection = tile.id }
-                            .contextMenu {
-                                Button("Remove from profile", role: .destructive) {
-                                    tilesBinding.wrappedValue.removeAll { $0.id == tile.id }
-                                    if selection == tile.id { selection = nil }
-                                }
-                            }
-                    }
-                }
+                itemsGrid
             }
+        }
+    }
+
+    // MARK: - Items grid
+
+    /// The cards, reordered by dragging one — a gesture like the live dock's rather
+    /// than `onDrag`/`onDrop`: on macOS, drop targets inside a
+    /// scrolled `ScrollView` are hit-tested at their unscrolled positions, so the cards
+    /// further down the list — where the widgets tend to be — never accepted a drop.
+    private var itemsGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 200), spacing: 10)],
+            alignment: .leading,
+            spacing: 10
+        ) {
+            ForEach(listedItems) { item in
+                card(item)
+                    .background(CardFrameReporter(id: item.id))
+                    // While held, the slot stays put — invisible — and the ghost follows the pointer.
+                    .opacity(draggingCard == item.id ? 0 : 1)
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection = item.id }
+                    .contextMenu {
+                        Button("Remove from profile", role: .destructive) {
+                            remove(item.id)
+                        }
+                    }
+                    .simultaneousGesture(cardDragGesture(item))
+            }
+        }
+        .overlay(cardGhost)
+        .coordinateSpace(name: "items")
+        .onPreferenceChange(CardFrameKey.self) { cardFrames = $0 }
+        .onChange(of: row) { pendingRow = nil }
+    }
+
+    @ViewBuilder
+    private func card(_ item: DockStripItem) -> some View {
+        switch item {
+        case .tile(let tile):
+            ItemCard(tile: tile, isSelected: selection == item.id)
+        case .widget(let widget):
+            WidgetItemCard(widget: widget, isSelected: selection == item.id)
+        }
+    }
+
+    @ViewBuilder
+    private var cardGhost: some View {
+        if let draggingCard, let item = listedItems.first(where: { $0.id == draggingCard }) {
+            let slot = cardFrames[draggingCard] ?? .zero
+            card(item)
+                .frame(width: slot.width, height: slot.height)
+                .scaleEffect(1.03)
+                .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
+                .position(dragPoint)
+                .allowsHitTesting(false)
+                .transition(.identity)
+        }
+    }
+
+    /// A card starts moving as soon as it is dragged a few points — no hold, unlike
+    /// the live dock, where a hold keeps a click from turning into a drag. A click
+    /// does not travel that far, so selecting still works.
+    private func cardDragGesture(_ item: DockStripItem) -> some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named("items"))
+            .onChanged { drag in
+                if draggingCard != item.id {
+                    draggingCard = item.id
+                    selection = item.id
+                    pendingRow = row
+                }
+                dragPoint = drag.location
+                shuffleCards(item.id)
+            }
+            .onEnded { _ in endCardDrag() }
+    }
+
+    /// Moves the held card into the slot of whichever card the pointer is over —
+    /// after it when moving down the list, before it when moving up.
+    private func shuffleCards(_ id: UUID) {
+        var order = listedItems
+        guard let from = order.firstIndex(where: { $0.id == id }),
+              let target = order.firstIndex(where: { $0.id != id && (cardFrames[$0.id]?.contains(dragPoint) ?? false) }),
+              target != from else { return }
+        let item = order.remove(at: from)
+        order.insert(item, at: target)
+        withAnimation(.easeInOut(duration: 0.15)) { pendingRow = order }
+    }
+
+    private func endCardDrag() {
+        guard draggingCard != nil else { return }
+        draggingCard = nil
+        if let order = pendingRow, order.map(\.id) != row.map(\.id) {
+            rowBinding.wrappedValue = order
+        } else {
+            pendingRow = nil
         }
     }
 
@@ -441,25 +565,43 @@ struct ProfileEditorView: View {
 
     private func removeSelection() {
         guard let selection else { return }
-        tilesBinding.wrappedValue.removeAll { $0.id == selection }
-        self.selection = nil
+        remove(selection)
+    }
+
+    private func remove(_ id: UUID) {
+        rowBinding.wrappedValue.removeAll { $0.id == id }
+        if selection == id { selection = nil }
     }
 
     private func append(_ tile: DockTile?) {
         guard let tile else { return }
-        tilesBinding.wrappedValue.append(tile)
+        rowBinding.wrappedValue.append(.tile(tile))
     }
 
-    private func add(_ urls: [URL]) {
-        var items = tiles
+    /// Adds files dropped or chosen, in front of `target` — or at the end without one.
+    private func add(_ urls: [URL], before target: UUID? = nil) {
+        var added: [DockStripItem] = []
         for url in urls where url.isFileURL {
             if url.pathExtension == "app" || section == .apps {
-                if let tile = DockTile.app(at: url) { items.append(tile) }
+                if let tile = DockTile.app(at: url) { added.append(.tile(tile)) }
             } else if let tile = DockTile.folder(at: url) {
-                items.append(tile)
+                added.append(.tile(tile))
             }
         }
-        tilesBinding.wrappedValue = items
+        guard !added.isEmpty else { return }
+        var items = row
+        let index = target.flatMap { id in items.firstIndex { $0.id == id } } ?? items.endIndex
+        items.insert(contentsOf: added, at: index)
+        rowBinding.wrappedValue = items
+    }
+
+    /// Pins Finder at the front of the row, where the Dock keeps it.
+    private func addFinder() {
+        guard !profile.apps.contains(where: { $0.isFinder }), let finder = DockTile.finder else { return }
+        var items = row
+        items.insert(.tile(finder), at: 0)
+        rowBinding.wrappedValue = items
+        selection = finder.id
     }
 
     private func addFromPanel() {
@@ -478,6 +620,65 @@ struct ProfileEditorView: View {
 }
 
 // MARK: - Item card
+
+/// A widget's place in the Items list when the custom dock is combined. Its
+/// settings live on the Custom dock tab; here it is a row to arrange among the apps.
+private struct WidgetItemCard: View {
+    let widget: WidgetTile
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.accentColor.opacity(0.12))
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Image(systemName: widget.kind.symbolName)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.accentColor)
+                )
+            VStack(alignment: .leading, spacing: 1) {
+                Text(widget.title)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                Text("Widget · \(widget.summary)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.10) : Color.primary.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+        )
+    }
+}
+
+/// Where each card sits in the grid, for the reorder gesture.
+private struct CardFrameReporter: View {
+    let id: UUID
+
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(key: CardFrameKey.self, value: [id: geometry.frame(in: .named("items"))])
+        }
+    }
+}
+
+private struct CardFrameKey: PreferenceKey {
+    static let defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
 
 private struct ItemCard: View {
     let tile: DockTile

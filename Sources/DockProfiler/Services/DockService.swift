@@ -1,6 +1,17 @@
 import AppKit
 import Foundation
 
+/// The Dock settings a combined custom dock overrides, kept so they can be put back.
+struct DockHideState: Codable, Equatable {
+    var autohide: Bool
+    /// `autohide-delay`, when the user has one set; nil means the key is absent.
+    var autohideDelay: Double?
+
+    /// Auto-hidden with a delay so long the Dock never comes back on its own —
+    /// ⌘⌥D still toggles it, and it returns when this state is restored.
+    static let parked = DockHideState(autohide: true, autohideDelay: 1_000_000)
+}
+
 struct DockSnapshot {
     var apps: [DockTile] = []
     var others: [DockTile] = []
@@ -63,9 +74,20 @@ enum DockService {
         return appearance
     }
 
+    static func readHideState() -> DockHideState {
+        CFPreferencesAppSynchronize(domain)
+        return DockHideState(
+            autohide: value("autohide", as: Bool.self) ?? false,
+            autohideDelay: value("autohide-delay", as: Double.self)
+        )
+    }
+
     // MARK: - Writing
 
-    static func apply(profile: DockProfile) throws {
+    /// `hideState`, when given, is written after the profile's own Dock settings:
+    /// `.parked` keeps the macOS Dock out of the way of a combined custom dock, and
+    /// the state read before that puts it back once that is over.
+    static func apply(profile: DockProfile, hideState: DockHideState? = nil) throws {
         write(tiles: profile.apps, to: .apps)
         if profile.managesOthers {
             write(tiles: profile.others, to: .others)
@@ -73,14 +95,37 @@ enum DockService {
         if profile.appearance.enabled {
             write(appearance: profile.appearance)
         }
+        if let hideState {
+            write(hideState: hideState)
+        }
         guard CFPreferencesAppSynchronize(domain) else {
             throw DockServiceError.preferencesWriteFailed
         }
     }
 
     private static func write(tiles: [DockTile], to section: DockSection) {
-        let array = tiles.map { $0.dockDictionary() } as CFArray
+        // The Dock draws Finder itself; pinning it as well gives the Dock two of them.
+        // A profile can still carry Finder for its custom dock, which has no Finder
+        // of its own.
+        let array = tiles.filter { !$0.isFinder }.map { $0.dockDictionary() } as CFArray
         CFPreferencesSetAppValue(section.preferenceKey as CFString, array, domain)
+    }
+
+    static func write(hideState: DockHideState) {
+        CFPreferencesSetAppValue("autohide" as CFString, hideState.autohide as CFBoolean, domain)
+        if let delay = hideState.autohideDelay {
+            CFPreferencesSetAppValue("autohide-delay" as CFString, delay as CFNumber, domain)
+        } else {
+            CFPreferencesSetAppValue("autohide-delay" as CFString, nil, domain)
+        }
+    }
+
+    /// Writes a hide state on its own and restarts the Dock — for putting it back
+    /// when the app quits, or parking it again at launch.
+    static func applyHideStateNow(_ hideState: DockHideState) {
+        write(hideState: hideState)
+        CFPreferencesAppSynchronize(domain)
+        restartDock()
     }
 
     private static func write(appearance: DockAppearance) {

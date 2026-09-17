@@ -100,13 +100,14 @@ Three ways, all doing the same thing:
 | Folders, files, stacks *(optional)* | Replaces `persistent-others` — off by default, so that side of the Dock is left alone |
 | Dock appearance *(optional)* | Position, size, magnification, auto-hide, recents, minimize-into-icon |
 | Desktop wallpaper *(optional)* | Sets the desktop picture on the desktop you are on |
+| Custom dock *(optional)* | Shows Dock Profiler's own dock — apps and widgets together, or a strip of widgets on its own — on any edge, with optional auto-hide |
 
 Spacers come in two sizes, regular and small. Flexible spacers are not offered — macOS
 does not apply them reliably — though one already in a captured Dock is preserved as-is.
 
 The editor puts your Dock on screen as a Dock: drag the icons to reorder, drop an app in
-from Finder to add, right-click or press ⌫ to remove. Underneath, three tabs — **Items**,
-**Dock**, **Desktop** — carry a dot when that part of the profile is switched on, and a
+from Finder to add, right-click or press ⌫ to remove. Underneath, four tabs — **Items**,
+**Dock**, **Custom Dock**, **Desktop** — carry a dot when that part of the profile is switched on, and a
 sentence at the top spells out exactly what activating it will do and what it leaves
 alone.
 
@@ -125,21 +126,102 @@ the picture for whichever Space is on screen at that moment, so the wallpaper la
 the desktop you are on — which is how "the development desktop" ends up looking
 different from the others. Optionally on every display, or just the main one.
 
+## The custom dock
+
+The macOS Dock has no extension point: `persistent-apps` only takes apps, folders, links
+and spacers, so nothing live can be pinned to it. A profile can instead carry a **custom
+dock** that Dock Profiler draws itself, in a borderless panel that never takes focus,
+follows you across Spaces, and sits below the Dock's own window level so an auto-hidden
+macOS Dock still slides in over it. It comes in two forms:
+
+- **Apps and widgets** — one dock holding the profile's apps and its widgets, in the
+  order you arrange them in the editor's preview, standing in for the macOS Dock. App
+  tiles launch or bring an app forward, carry the running dot, and offer Hide, Quit and
+  Show in Finder on right-click. Optionally, apps that are open but not in the profile
+  follow after a divider, as the Dock does. While such a profile is active the macOS
+  Dock is parked — auto-hidden with a delay so long it never comes back on hover (⌘⌥D
+  still toggles it). Its own settings come back with the next profile that neither
+  stands in for it nor manages Dock settings itself, and when Dock Profiler quits.
+- **Widgets only** — a strip of widgets beside the macOS Dock.
+
+Either form goes on any edge: bottom or top, hugging the left, centre or right; or left
+or right, centred on the edge and stacked as a column with the dots beside the icons.
+In a column every widget becomes a tile the size of an icon and re-flows to fit —
+the battery's percentage moves under its icon, each agent session becomes a dot over
+its folder name — and hovering any tile shows the dock's own tooltip with the detail.
+A **size** slider (36–96 pt) scales icons, cards and type together, and **magnification**
+grows the tiles under the pointer, pushing their neighbours aside, as the Dock does. **Hide until the
+pointer reaches its edge** slides it off screen and brings it back when the pointer runs
+into the edge where it lives — polling the pointer position, so no Accessibility
+permission. While it is away, a slim mark stays on the edge where it went, so you
+know something is there to open; it brightens a little as the pointer heads its way.
+Turn that off if you would rather have the edge to yourself.
+
+Widgets keep their place among the apps by anchoring to the app before them rather than
+to a position, so when the Dock is rearranged underneath the profile (auto-save replaces
+the app list wholesale) each widget stays next to the app it followed.
+
+In Mission Control a combined dock stays on screen in place of the macOS Dock — drawn
+just above the Dock's own window level, the one Mission Control does not hide. Mission
+Control still draws the parked macOS Dock underneath; there is no API to stop it, but
+the custom dock sits in front of it.
+
+The dock follows the active profile: activate one with a custom dock and it appears,
+activate one without and it goes away, edit the active profile and it updates as you go.
+It can also be rearranged in place, the Dock's way: hold a tile or widget for a moment,
+drag it along the dock and let go — the profile is updated as you drop.
+
+### Widgets
+
+- **Clock**, **Date**, **Battery** — the glanceable ones.
+- **Now Playing** — the track in Music or Spotify, with its album art. Click to play
+  or pause; skip from the context menu, or turn on previous/next buttons on its card.
+- **Profiles** — the active profile; click for the list and switch without going to
+  the menu bar.
+- **Trash** — full or empty. Click to open it, drop files on it to delete them, empty
+  it from the context menu. Handy in a combined dock, which stands in for the Dock's own.
+- **Folder** — a folder that opens into its most recent files, newest first, like a
+  Dock stack. Downloads by default; choose any folder on its card in the editor.
+- **App Stack** — several apps folded into one tile, a grid of their icons, that opens
+  into the apps. Add apps on its card or drop them from Finder.
+- **Agents** — see below. It can also fold into one tile with a count that opens into
+  the list.
+
+Stacks open in a panel beside the dock, on the side away from its edge, that goes away
+on a click anywhere else — and, like the dock, never takes focus from the front app.
+
+### The Agents widget
+
+If you use [Agent Frame](https://github.com/estruyf/vscode-agent-frame) in VS Code, the
+**Agents** widget shows a card per Claude Code session — folder, and whether it is
+working, waiting for you, or idle, in Agent Frame's own colours, the ones that need you
+first. It reads the session files Agent Frame's hooks keep in `~/.agent-frame/sessions`,
+so there is nothing extra to set up. Beyond four sessions the rest fold into a menu.
+
+Click a card to bring that session's editor forward. The hook records the agent's
+process, and walking up from it reaches the app hosting the session — VS Code, Insiders,
+Cursor — so the folder is opened with that app, which focuses the window that already
+has it.
+
 Switching Spaces is not part of a profile. macOS has no public API for it, so it would
 mean posting `Control + ←/→` keystrokes and asking for Accessibility access — a
 permission for something the Dock profile itself never needed.
 
 ## Permissions
 
-Dock Profiler asks for **no privacy permissions at all**. It reads and writes
-`com.apple.dock`, sets the desktop picture through `NSWorkspace`, and registers its
-shortcut through Carbon hot keys — none of which need Accessibility, Screen Recording or
-Automation access.
+Dock Profiler asks for **no privacy permissions** for what it does itself. It reads and
+writes `com.apple.dock`, sets the desktop picture through `NSWorkspace`, and registers
+its shortcut through Carbon hot keys — none of which need Accessibility, Screen Recording
+or Automation access. Two widgets talk to other apps, and macOS asks about those the
+first time they do.
 
 | Permission | Needed for | Prompted |
 | --- | --- | --- |
-| *(none)* | Dock profiles, wallpaper | Nothing to grant |
+| *(none)* | Dock profiles, wallpaper, most widgets | Nothing to grant |
 | *(none)* | The global shortcut | Carbon hot keys need no permission |
+| Automation → Music / Spotify | Now Playing's first read and its play, pause and skip; track changes themselves arrive over notifications that need nothing | Once, when the widget first asks the player |
+| Automation → Finder | Empty Trash from the Trash widget | Once, the first time you empty it |
+| Files and Folders | The Trash widget counting what is in the Trash; the Folder widget reading a protected folder such as Downloads | Once per folder |
 | Login item | Launch at login | Settings toggle (`SMAppService`) |
 
 ## Layout
@@ -149,14 +231,25 @@ Sources/DockProfiler/
   DockProfilerApp.swift          MenuBarExtra + Settings scenes, app delegate
   Models/DockTile.swift      One Dock item; keeps the Dock's own tile dictionary verbatim
   Models/DockProfile.swift   Profile, appearance and wallpaper options
+  Models/CustomDock.swift    Widget kinds, the custom dock's options, and the mixed row
   Services/DockService.swift Reads/writes com.apple.dock, restarts the Dock
   Services/WallpaperService.swift  Sets the desktop picture
+  Services/BatteryMonitor.swift    IOKit power source, for the battery widget
+  Services/AgentSessionMonitor.swift  Agent Frame's session files, for the agents widget
+  Services/NowPlayingMonitor.swift    Music and Spotify, for the now-playing widget
+  Services/TrashMonitor.swift         ~/.Trash, for the trash widget
+  Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
+  Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
   Services/DockWatcher.swift   Notices Dock changes for auto-save
   Services/AppSettings.swift   Preferences + login item
   Services/HotKeyManager.swift Carbon global shortcut
   Services/KeyCombo.swift      A recorded shortcut, in Carbon's terms
   UI/                        Menu bar panel, quick switcher, welcome, manager window, editor, settings
+  UI/CustomDockWindowController.swift  The floating custom dock, following the active profile
+  UI/DockTooltip.swift                 The dock's own hover tips
+  UI/DockStack.swift                   The panel a stack widget opens into
+  UI/DockWidgets.swift                 Now playing, profiles, trash, folder and app stacks
 ```
 
 Profiles live in `~/Library/Application Support/Dock Profiler/profiles.json`. Each item keeps

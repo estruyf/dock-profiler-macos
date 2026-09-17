@@ -66,11 +66,24 @@ final class ProfileStore: ObservableObject {
         var activeProfileID: UUID?
     }
 
+    /// Set when the store on disk could not be read. Nothing is written back
+    /// while this is true, so a file a newer build wrote is never replaced by an
+    /// empty one.
+    private(set) var loadFailed = false
+
     private func load() {
         guard let data = try? Data(contentsOf: storeURL) else { return }
-        guard let file = try? JSONDecoder().decode(StoreFile.self, from: data) else { return }
-        profiles = file.profiles
-        activeProfileID = file.activeProfileID
+        do {
+            let file = try JSONDecoder().decode(StoreFile.self, from: data)
+            profiles = file.profiles
+            activeProfileID = file.activeProfileID
+        } catch {
+            loadFailed = true
+            let copy = storeURL.deletingLastPathComponent()
+                .appendingPathComponent("profiles-unreadable-\(Int(Date().timeIntervalSince1970)).json")
+            try? FileManager.default.copyItem(at: storeURL, to: copy)
+            lastError = "Could not read your profiles (\(error.localizedDescription)). They are untouched, and a copy was kept next to them as \(copy.lastPathComponent)."
+        }
     }
 
     private func scheduleSave() {
@@ -83,6 +96,7 @@ final class ProfileStore: ObservableObject {
     }
 
     func saveNow() {
+        guard !loadFailed else { return }
         let file = StoreFile(profiles: profiles, activeProfileID: activeProfileID)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -170,8 +184,23 @@ final class ProfileStore: ObservableObject {
         ignoreDockChangesUntil = Date().addingTimeInterval(6)
         defer { isApplying = false }
 
+        // A combined custom dock stands in for the macOS Dock, so the Dock is parked
+        // — auto-hidden, and never coming back on hover — for as long as such a
+        // profile is active. Its own settings come back with the next profile that
+        // neither stands in for it nor manages Dock settings itself.
+        var hideState: DockHideState?
+        if profile.customDock.isCombined {
+            if settings.dockStateBeforeCustomDock == nil {
+                settings.dockStateBeforeCustomDock = DockService.readHideState()
+            }
+            hideState = .parked
+        } else if let previous = settings.dockStateBeforeCustomDock {
+            hideState = profile.appearance.enabled ? DockHideState(autohide: profile.appearance.autohide, autohideDelay: previous.autohideDelay) : previous
+            settings.dockStateBeforeCustomDock = nil
+        }
+
         do {
-            try DockService.apply(profile: profile)
+            try DockService.apply(profile: profile, hideState: hideState)
             activeProfileID = profile.id
             saveNow()
             DockService.restartDock()
@@ -193,6 +222,28 @@ final class ProfileStore: ObservableObject {
         lastActivatedAt = Date()
     }
 
+    // MARK: - Parking the Dock across launches
+
+    /// At launch: if the active profile stands in for the Dock, park it again (the
+    /// Dock was put back when the app last quit).
+    func parkDockIfNeeded() {
+        guard let profile = activeProfile, profile.customDock.isCombined else { return }
+        let current = DockService.readHideState()
+        guard current != .parked else { return }
+        if settings.dockStateBeforeCustomDock == nil {
+            settings.dockStateBeforeCustomDock = current
+        }
+        ignoreDockChangesUntil = Date().addingTimeInterval(6)
+        DockService.applyHideStateNow(.parked)
+    }
+
+    /// At quit: the custom dock goes away with the app, so the macOS Dock comes back.
+    func restoreDockIfNeeded() {
+        guard let previous = settings.dockStateBeforeCustomDock else { return }
+        settings.dockStateBeforeCustomDock = nil
+        DockService.applyHideStateNow(previous)
+    }
+
     // MARK: - Auto-save
 
     private func dockChangedExternally() {
@@ -203,8 +254,15 @@ final class ProfileStore: ObservableObject {
         let snapshot = DockService.snapshot()
         var changed = false
 
-        if snapshot.apps.map(\.raw) != profiles[index].apps.map(\.raw) {
-            profiles[index].apps = snapshot.apps
+        // Finder is never in the Dock's own list, so it is left out of the comparison
+        // and kept where the profile had it.
+        let pinned = profiles[index].apps.filter { !$0.isFinder }
+        if snapshot.apps.map(\.raw) != pinned.map(\.raw) {
+            var apps = snapshot.apps
+            if let finderIndex = profiles[index].apps.firstIndex(where: \.isFinder) {
+                apps.insert(profiles[index].apps[finderIndex], at: min(finderIndex, apps.count))
+            }
+            profiles[index].apps = apps
             changed = true
         }
         if profiles[index].managesOthers,

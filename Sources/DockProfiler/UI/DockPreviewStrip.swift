@@ -3,26 +3,31 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The Dock, drawn as a Dock. Reordering a profile happens here rather than in a list.
+/// With a combined custom dock the row carries the widgets too, in among the apps.
 struct DockPreviewStrip: View {
-    @Binding var tiles: [DockTile]
+    @Binding var items: [DockStripItem]
     @Binding var selection: UUID?
     let onAdd: () -> Void
-    let onDropURLs: ([URL]) -> Void
+    /// Files dropped from Finder, and the item they landed on — nil for the end of the row.
+    let onDropURLs: ([URL], UUID?) -> Void
 
-    @State private var dragging: DockTile?
+    @State private var dragging: UUID?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                ForEach(tiles) { tile in
-                    tileView(tile)
+                ForEach(items) { item in
+                    itemView(item)
                         .onDrag {
-                            dragging = tile
-                            return NSItemProvider(object: tile.id.uuidString as NSString)
+                            dragging = item.id
+                            return NSItemProvider(object: item.id.uuidString as NSString)
                         }
                         .onDrop(
-                            of: [.text],
-                            delegate: TileReorderDelegate(item: tile, tiles: $tiles, dragging: $dragging)
+                            of: [.text, .fileURL],
+                            delegate: DockRowReorderDelegate(
+                                id: item.id, items: $items, dragging: $dragging,
+                                onDropURLs: { urls in onDropURLs(urls, item.id) }
+                            )
                         )
                 }
 
@@ -45,7 +50,7 @@ struct DockPreviewStrip: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
             // A tile let go in the gaps between tiles still ends the drag cleanly.
-            .onDrop(of: [.text], delegate: DragEndDelegate(dragging: $dragging))
+            .onDrop(of: [.text], delegate: DockRowDragEndDelegate(dragging: $dragging))
         }
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -56,18 +61,58 @@ struct DockPreviewStrip: View {
                 )
                 .shadow(color: .black.opacity(0.18), radius: 7, y: 2)
         )
+        // Anywhere else on the strip — after the last tile, or the empty end — adds to the end.
         .dropDestination(for: URL.self) { urls, _ in
-            onDropURLs(urls)
+            onDropURLs(urls, nil)
             return true
         }
     }
 
     @ViewBuilder
-    private func tileView(_ tile: DockTile) -> some View {
-        let isSelected = selection == tile.id
+    private func itemView(_ item: DockStripItem) -> some View {
+        let isSelected = selection == item.id
 
         // A plain view rather than a Button: a Button swallows the mouse-down that
         // `onDrag` needs to start a drag session.
+        Group {
+            switch item {
+            case .widget(let widget):
+                WidgetTileView(tile: widget)
+                    // Widgets are live, and a click here should select, not act.
+                    .allowsHitTesting(false)
+            case .tile(let tile):
+                tileView(tile)
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(Color.accentColor, lineWidth: 3)
+                .opacity(isSelected ? 1 : 0)
+                .padding(-3)
+        )
+        .overlay(alignment: .topTrailing) {
+            if let tile = item.tile, tile.isMissing {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.orange)
+                    .padding(2)
+            }
+        }
+        // The spacer is only an outline; without this, clicks inside it fall through.
+        .contentShape(Rectangle())
+        .onTapGesture { selection = item.id }
+        .opacity(dragging == item.id ? 0.35 : 1)
+        .help(item.tile?.label ?? item.widget?.title ?? "")
+        .contextMenu {
+            Button("Remove from profile", role: .destructive) {
+                items.removeAll { $0.id == item.id }
+                if selection == item.id { selection = nil }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tileView(_ tile: DockTile) -> some View {
         Group {
             if tile.kind.isSpacer {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -88,31 +133,6 @@ struct DockPreviewStrip: View {
                         Image(systemName: tile.isMissing ? "questionmark" : tile.kind.symbolName)
                             .foregroundStyle(DockPalette.onSlab.opacity(0.7))
                     )
-            }
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 13, style: .continuous)
-                .strokeBorder(Color.accentColor, lineWidth: 3)
-                .opacity(isSelected ? 1 : 0)
-                .padding(-3)
-        )
-        .overlay(alignment: .topTrailing) {
-            if tile.isMissing {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.orange)
-                    .padding(2)
-            }
-        }
-        // The spacer is only an outline; without this, clicks inside it fall through.
-        .contentShape(Rectangle())
-        .onTapGesture { selection = tile.id }
-        .opacity(dragging?.id == tile.id ? 0.35 : 1)
-        .help(tile.label)
-        .contextMenu {
-            Button("Remove from profile", role: .destructive) {
-                tiles.removeAll { $0.id == tile.id }
-                if selection == tile.id { selection = nil }
             }
         }
     }
@@ -147,35 +167,52 @@ enum DockPalette {
     }
 }
 
-/// Live reordering: the tiles shuffle as the drag passes over them.
-private struct TileReorderDelegate: DropDelegate {
-    let item: DockTile
-    @Binding var tiles: [DockTile]
-    @Binding var dragging: DockTile?
+/// Live reordering: the items shuffle as the drag passes over them. A drag from
+/// Finder is not a reorder; it is handed to `onDropURLs` to land on this item.
+/// Shared by the Dock preview and the Items list, which edit the same row.
+struct DockRowReorderDelegate: DropDelegate {
+    let id: UUID
+    @Binding var items: [DockStripItem]
+    @Binding var dragging: UUID?
+    var onDropURLs: (([URL]) -> Void)?
+
+    private var isReordering: Bool { dragging != nil }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        if isReordering { return true }
+        return onDropURLs != nil && info.hasItemsConforming(to: [.fileURL])
+    }
 
     func dropEntered(info: DropInfo) {
-        guard let dragging, dragging.id != item.id,
-              let from = tiles.firstIndex(where: { $0.id == dragging.id }),
-              let to = tiles.firstIndex(where: { $0.id == item.id }) else { return }
+        guard let dragging, dragging != id,
+              let from = items.firstIndex(where: { $0.id == dragging }),
+              let to = items.firstIndex(where: { $0.id == id }) else { return }
         withAnimation(.easeInOut(duration: 0.18)) {
-            tiles.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            items.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
         }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+        DropProposal(operation: isReordering ? .move : .copy)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        dragging = nil
+        if isReordering {
+            dragging = nil
+            return true
+        }
+        guard let onDropURLs else { return false }
+        loadFileURLs(from: info, completion: onDropURLs)
         return true
     }
 }
 
-/// Catches a tile dropped on the strip itself (between tiles or in the padding) so the
-/// dragged tile is not left dimmed.
-private struct DragEndDelegate: DropDelegate {
-    @Binding var dragging: DockTile?
+/// Catches an item dropped on the container itself (between items or in the padding)
+/// so the dragged one is not left dimmed. Anything else falls through to the container.
+struct DockRowDragEndDelegate: DropDelegate {
+    @Binding var dragging: UUID?
+
+    func validateDrop(info: DropInfo) -> Bool { dragging != nil }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
         DropProposal(operation: dragging == nil ? .cancel : .move)
@@ -186,3 +223,26 @@ private struct DragEndDelegate: DropDelegate {
         return true
     }
 }
+
+/// Reads the file URLs out of a drop, in the order they were dragged, and hands them
+/// over on the main queue.
+private func loadFileURLs(from info: DropInfo, completion: @escaping ([URL]) -> Void) {
+    let providers = info.itemProviders(for: [.fileURL])
+    guard !providers.isEmpty else { return }
+    var urls = [URL?](repeating: nil, count: providers.count)
+    let group = DispatchGroup()
+    let lock = NSLock()
+    for (index, provider) in providers.enumerated() {
+        group.enter()
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            lock.lock()
+            urls[index] = url
+            lock.unlock()
+            group.leave()
+        }
+    }
+    group.notify(queue: .main) {
+        completion(urls.compactMap { $0 })
+    }
+}
+

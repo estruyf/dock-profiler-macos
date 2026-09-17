@@ -5,6 +5,92 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Custom dock.** A profile can now carry a dock of Dock Profiler's own,
+  drawn in a floating panel that never takes focus. Either **apps and
+  widgets** together — the profile's apps, with widgets dragged in among them
+  in the editor's preview, standing in for the macOS Dock, which is parked out
+  of the way while the profile is active and put back afterwards — or
+  **widgets only**, a strip beside the macOS Dock. It goes on any edge (bottom
+  or top, left, centre or right; or left or right, centred), can show apps that
+  are open but not pinned, can hide until the pointer reaches its edge — leaving
+  a slim mark on the edge, if you like, so you know it is there — has a size
+  slider, and can magnify tiles under the pointer. In a column the widgets
+  become icon-sized tiles and re-flow to fit, and every tile has a hover tip
+  with its detail.
+- **Widgets.** Clock, date and battery, plus:
+  - **Agents** — what the Claude Code sessions tracked by
+    [Agent Frame](https://github.com/estruyf/vscode-agent-frame) are doing —
+    working, waiting, idle — as a card per session in Agent Frame's colours,
+    read from its session files. Click a card to bring the editor window
+    hosting that session forward. Or fold them into **one tile** with a count
+    that opens into the list.
+  - **Now Playing** — the track in Music or Spotify, with its album art.
+    Click to play or pause; skip from the context menu, or turn on previous
+    and next buttons on the widget's card. Track changes arrive over
+    distributed notifications; the first read, the artwork and the controls
+    use Apple Events, so macOS asks once whether Dock Profiler may control the
+    player.
+  - **Profiles** — the active profile, opening into the list to switch to
+    another one without going to the menu bar.
+  - **Trash** — the can, full or empty. Click to open it, drop files on it to
+    delete them, empty it from the context menu.
+  - **Folder** — a folder that opens into its most recent files, like a Dock
+    stack. Downloads by default; choose any folder on its card in the editor.
+  - **App Stack** — several apps folded into one tile, a grid of their icons,
+    opening into the apps themselves. Add apps on its card or drop them from
+    Finder.
+  Stacks open in a panel beside the dock that closes on a click anywhere else,
+  and — like the dock — never takes focus from the front app.
+
+### Changed
+
+- Profiles saved by an older version now load with defaults for any field
+  added since, instead of the whole store failing to decode.
+- **Items can be reordered in the list too**, by dragging a card; the others
+  shuffle aside and the Dock preview above follows, since both edit the same
+  row. (It is a gesture like the live dock's rather than a system drag, because
+  on macOS drop targets inside a scrolled list are hit-tested where they were
+  before scrolling — cards further down, where the widgets tend to sit, never
+  took a drop.)
+- **A widget can sit on either side of a spacer.** Widgets keep their place by
+  anchoring to the app before them, and a spacer has no path to anchor to, so
+  a widget after a spacer used to jump back in front of it. Spacers between
+  the app and the widget are counted now, so `App · Spacer · Widget` and
+  `App · Widget · Spacer` both stay as arranged.
+- **Widgets appear in the Items list** when the custom dock is combined, in
+  among the apps as the dock shows them, so the whole row can be arranged and
+  trimmed from one place. Their settings stay on the Custom dock tab.
+- **The custom dock can be rearranged in place**, the Dock's way: hold a tile
+  or widget for a moment, drag it along the dock, let go. The others shuffle
+  aside as it passes and the profile is updated, so there is no need to open
+  the editor for a quick reorder. A plain click still opens the tile.
+- **A combined custom dock shows up in Mission Control**, drawn just above the
+  macOS Dock's own window level — the one level Mission Control leaves on
+  screen — and in front of the parked Dock, which Mission Control draws
+  regardless of auto-hide. A widgets-only strip stays at the ordinary floating
+  level, below a live Dock that must still be able to slide over it. A custom
+  dock set to hide until the pointer reaches its edge comes out for Mission
+  Control, as the Dock does, and hides again afterwards — nothing announces
+  Mission Control, so the pointer poll that runs while the dock is hidden
+  watches for the screen-sized window the Dock process puts up for it.
+- **Tooltips are centred on their tile and sit clear of the dock.** They
+  anchor on the tile's own frame, above the dock's panel — which includes the
+  room magnified tiles grow into — rather than on the pointer, so they no
+  longer overlap a tile, magnified or not, and do not wander with the pointer.
+- **Finder can be added in one click.** The Dock shows Finder without it being
+  pinned, so a captured profile never has it and a combined custom dock —
+  which has no Finder of its own — went without unless you dug it out of
+  `/System/Library/CoreServices`. The arrow beside **Add app…** now offers
+  Finder, pinned at the front as the Dock has it. It is left out when a profile
+  is written to the macOS Dock, which would otherwise show two.
+- **An app dragged from Finder can be dropped anywhere on the Dock preview**,
+  and lands where it was dropped. Before, only the empty space past the `+`
+  took the drop; the tiles themselves swallowed it as an attempted reorder.
+
 ## [1.1.3] - 2026-09-16
 
 ### Fixed

@@ -14,6 +14,7 @@ final class AppSettings: ObservableObject {
         static let switcherShortcut = "switcherShortcut"
         static let switcherShortcutEnabled = "switcherShortcutEnabled"
         static let hasSeenWelcome = "hasSeenWelcome"
+        static let dockStateBeforeCustomDock = "dockStateBeforeCustomDock"
     }
 
     private let defaults = UserDefaults.standard
@@ -73,6 +74,22 @@ final class AppSettings: ObservableObject {
 
     @Published var hasSeenWelcome: Bool {
         didSet { defaults.set(hasSeenWelcome, forKey: Key.hasSeenWelcome) }
+    }
+
+    /// A combined custom dock parks the macOS Dock. These are the Dock's own settings
+    /// from before we did that, so they can be put back afterwards.
+    var dockStateBeforeCustomDock: DockHideState? {
+        get {
+            guard let data = defaults.data(forKey: Key.dockStateBeforeCustomDock) else { return nil }
+            return try? JSONDecoder().decode(DockHideState.self, from: data)
+        }
+        set {
+            if let newValue, let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Key.dockStateBeforeCustomDock)
+            } else {
+                defaults.removeObject(forKey: Key.dockStateBeforeCustomDock)
+            }
+        }
     }
 
     private init() {

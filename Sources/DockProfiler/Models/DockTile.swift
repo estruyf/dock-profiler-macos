@@ -162,6 +162,14 @@ struct DockTile: Codable, Identifiable, Hashable {
         return DockTile(dictionary: ["tile-data": tileData, "tile-type": "file-tile"])
     }
 
+    /// Finder, which the Dock shows without it ever being pinned. Handy for a
+    /// combined custom dock, which stands in for the Dock and has to pin it.
+    static var finder: DockTile? {
+        app(at: URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"))
+    }
+
+    var isFinder: Bool { bundleIdentifier == "com.apple.finder" }
+
     static func folder(at url: URL) -> DockTile? {
         let tileData: [String: Any] = [
             "file-data": [
@@ -192,7 +200,10 @@ struct DockTile: Codable, Identifiable, Hashable {
     var icon: NSImage? {
         guard !kind.isSpacer else { return nil }
         guard let path, FileManager.default.fileExists(atPath: path) else { return nil }
-        return NSWorkspace.shared.icon(forFile: path)
+        // /Applications/Safari.app is a symlink into a cryptex on recent macOS, and
+        // the icon for a symlink carries the alias badge.
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return NSWorkspace.shared.icon(forFile: resolved)
     }
 
     var subtitle: String {

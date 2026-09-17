@@ -27,14 +27,27 @@ struct DockProfilerApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var terminationSignal: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // `kill` and `killall` skip applicationWillTerminate; the macOS Dock must
+        // still come back if we parked it.
+        signal(SIGTERM, SIG_IGN)
+        terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        terminationSignal?.setEventHandler {
+            MainActor.assumeIsolated { ProfileStore.shared.restoreDockIfNeeded() }
+            exit(0)
+        }
+        terminationSignal?.resume()
         MainActor.assumeIsolated {
             AppSettings.shared.refreshLoginItemStatus()
             HotKeyManager.shared.onTrigger = {
                 SwitcherWindowController.shared.toggle()
             }
             AppSettings.shared.applyShortcut()
+            CustomDockWindowController.shared.start()
+            ProfileStore.shared.parkDockIfNeeded()
             if ProfileStore.shared.profiles.isEmpty, !AppSettings.shared.hasSeenWelcome {
                 WelcomeWindowController.shared.show()
             }
@@ -75,6 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             break
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { ProfileStore.shared.restoreDockIfNeeded() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

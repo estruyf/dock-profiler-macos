@@ -65,6 +65,10 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("About") {
+                AboutRow()
+            }
         }
         .formStyle(.grouped)
         .toolbar { toolbarContent }
@@ -79,6 +83,63 @@ struct SettingsView: View {
             PaneTitle(symbol: "gearshape", tint: .secondary) {
                 Text("Settings").font(.system(size: 15, weight: .semibold))
             }
+        }
+    }
+}
+
+/// The icon, the version and where to go from here. There is no main menu for
+/// a standard About panel to hang off, so this row is it.
+private struct AboutRow: View {
+    @State private var copied = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(nsImage: AppInfo.icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 64, height: 64)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AppInfo.name)
+                    .font(.system(size: 15, weight: .semibold))
+                HStack(spacing: 6) {
+                    Text(AppInfo.versionDescription)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button {
+                        copyVersion()
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11))
+                            .foregroundStyle(copied ? .green : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy the version and macOS build, for a bug report")
+                }
+                Text(AppInfo.copyright)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                HStack(spacing: 12) {
+                    Link("GitHub", destination: AppInfo.repository)
+                    Link("What's new", destination: AppInfo.changelog)
+                    Link("Report an issue", destination: AppInfo.issues)
+                }
+                .font(.caption)
+                .padding(.top, 6)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func copyVersion() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(AppInfo.diagnosticSummary, forType: .string)
+        withAnimation { copied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation { copied = false }
         }
     }
 }

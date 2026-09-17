@@ -5,6 +5,15 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **About section** at the bottom of Settings: the app's icon, its version and
+  build number, and links to GitHub, the changelog and the issue tracker. The
+  copy button beside the version puts it on the clipboard together with the
+  macOS version, ready for a bug report.
+
 ## [1.3.0] - 2026-09-17
 
 ### Added

@@ -42,6 +42,15 @@ enum UsageProblem: Equatable {
     case unauthorized
     case failed(String)
 
+    /// Clears by itself once the service's own tool has signed in again, so it is worth
+    /// looking for that rather than waiting to be asked.
+    var awaitsSignIn: Bool {
+        switch self {
+        case .signedOut, .unauthorized: return true
+        case .keychainDenied, .failed: return false
+        }
+    }
+
     var title: String {
         switch self {
         case .signedOut: return "Not signed in"
@@ -89,10 +98,17 @@ final class AIUsageMonitor: ObservableObject {
 
     /// Often enough to catch a window resetting, seldom enough not to bother the APIs.
     static let interval: TimeInterval = 5 * 60
+    /// While a service waits on its own tool to sign in again, its credentials are
+    /// re-read this often, so the new sign-in shows up without a click. The read is
+    /// local; the API is only asked again once the token is no longer the one it refused.
+    static let retryInterval: TimeInterval = 20
 
     private var subscribers = 0
     private var timer: Timer?
+    private var retryTimer: Timer?
     private var tasks: [UsageService: Task<Void, Never>] = [:]
+    /// The token each service refused, so a retry can tell a fresh sign-in from it.
+    private var refused: [UsageService: String] = [:]
     private var wakeToken: NSObjectProtocol?
 
     private init() {}
@@ -120,6 +136,7 @@ final class AIUsageMonitor: ObservableObject {
         guard subscribers == 0 else { return }
         timer?.invalidate()
         timer = nil
+        stopRetrying()
         if let wakeToken { NSWorkspace.shared.notificationCenter.removeObserver(wakeToken) }
         wakeToken = nil
         for task in tasks.values { task.cancel() }
@@ -132,28 +149,60 @@ final class AIUsageMonitor: ObservableObject {
     /// Fetches every service, or just the one. A fetch already under way is left to finish.
     func refresh(_ only: UsageService? = nil) {
         let services = only.map { [$0] } ?? UsageService.allCases
-        for service in services where tasks[service] == nil {
-            refreshing.insert(service)
-            tasks[service] = Task { [weak self] in
-                let outcome = await Self.fetch(service)
-                guard !Task.isCancelled else { return }
-                self?.finish(service, with: outcome)
-            }
+        for service in services { fetch(service, unlessRefused: false) }
+    }
+
+    /// Looks again at the services waiting on a new sign-in, asking the API only
+    /// when the token on this Mac is no longer the one it refused.
+    private func retry() {
+        let waiting = UsageService.allCases.filter { problems[$0]?.awaitsSignIn == true }
+        guard !waiting.isEmpty else { return stopRetrying() }
+        for service in waiting { fetch(service, unlessRefused: true) }
+    }
+
+    private func startRetrying() {
+        guard retryTimer == nil, subscribers > 0 else { return }
+        retryTimer = Timer.scheduledTimer(withTimeInterval: Self.retryInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.retry() }
         }
     }
 
-    private func finish(_ service: UsageService, with outcome: Result<UsageReport, Error>) {
+    private func stopRetrying() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+    }
+
+    private func fetch(_ service: UsageService, unlessRefused: Bool) {
+        guard tasks[service] == nil else { return }
+        refreshing.insert(service)
+        let refused = unlessRefused ? refused[service] : nil
+        tasks[service] = Task { [weak self] in
+            let outcome = await Self.fetch(service, unless: refused)
+            guard !Task.isCancelled else { return }
+            self?.finish(service, with: outcome)
+        }
+    }
+
+    private func finish(_ service: UsageService, with outcome: Outcome) {
         tasks[service] = nil
         refreshing.remove(service)
         switch outcome {
-        case .success(let report):
+        case .stillRefused:
+            break
+        case .report(let report):
             reports[service] = report
             problems[service] = nil
-        case .failure(let error):
-            problems[service] = Self.problem(for: error)
+            refused[service] = nil
+        case .problem(let error, let token):
+            let problem = Self.problem(for: error)
+            problems[service] = problem
             // A token that no longer works means the numbers behind it are gone too.
             if case UsageError.unauthorized = error { reports[service] = nil }
             if case UsageError.signedOut = error { reports[service] = nil }
+            // Only a token the server turned down is worth remembering: one that
+            // expired on this Mac never went out, and re-reading it costs nothing.
+            refused[service] = problem == .unauthorized ? token : nil
+            if problem.awaitsSignIn { startRetrying() }
         }
     }
 
@@ -169,15 +218,31 @@ final class AIUsageMonitor: ObservableObject {
         }
     }
 
+    private enum Outcome {
+        case report(UsageReport)
+        /// The token, when the request went out with one: the server refused it.
+        case problem(Error, token: String?)
+        /// The token is still the one the service refused; nothing was asked.
+        case stillRefused
+    }
+
     /// Off the main actor: reading the Keychain can block on a permission dialog.
-    private nonisolated static func fetch(_ service: UsageService) async -> Result<UsageReport, Error> {
+    private nonisolated static func fetch(_ service: UsageService, unless refused: String?) async -> Outcome {
+        var token: String?
         do {
+            let current: String
             switch service {
-            case .claude: return .success(try await ClaudeUsageSource.fetch())
-            case .copilot: return .success(try await CopilotUsageSource.fetch())
+            case .claude: current = try ClaudeUsageSource.token()
+            case .copilot: current = try CopilotUsageSource.token()
+            }
+            if current == refused { return .stillRefused }
+            token = current
+            switch service {
+            case .claude: return .report(try await ClaudeUsageSource.fetch(token: current))
+            case .copilot: return .report(try await CopilotUsageSource.fetch(token: current))
             }
         } catch {
-            return .failure(error)
+            return .problem(error, token: token)
         }
     }
 }
@@ -231,8 +296,7 @@ enum ClaudeUsageSource {
     static let keychainService = "Claude Code-credentials"
     static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 
-    static func fetch() async throws -> UsageReport {
-        let token = try accessToken()
+    static func fetch(token: String) async throws -> UsageReport {
         let json = try await UsageHTTP.json(usageURL, headers: [
             "Authorization": "Bearer \(token)",
             "anthropic-beta": "oauth-2025-04-20",
@@ -277,7 +341,7 @@ enum ClaudeUsageSource {
 
     // MARK: Credentials
 
-    private static func accessToken() throws -> String {
+    static func token() throws -> String {
         if let token = try keychainToken() { return token }
         if let token = fileToken() { return token }
         throw UsageError.signedOut
@@ -339,8 +403,7 @@ enum CopilotUsageSource {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/github-copilot", isDirectory: true)
     }
 
-    static func fetch() async throws -> UsageReport {
-        guard let token = oauthToken() else { throw UsageError.signedOut }
+    static func fetch(token: String) async throws -> UsageReport {
         // The endpoint is meant for the editor extensions, so it is asked for as one.
         let json = try await UsageHTTP.json(usageURL, headers: [
             "Authorization": "token \(token)",
@@ -388,7 +451,7 @@ enum CopilotUsageSource {
 
     /// `{"github.com:Iv1.…": {"user": "…", "oauth_token": "gho_…"}}`; the key names
     /// the host and the OAuth app, and there is normally one entry.
-    private static func oauthToken() -> String? {
+    static func token() throws -> String {
         for name in ["apps.json", "hosts.json"] {
             let file = configDirectory.appendingPathComponent(name)
             guard let data = try? Data(contentsOf: file),
@@ -401,7 +464,7 @@ enum CopilotUsageSource {
                 }
             }
         }
-        return nil
+        throw UsageError.signedOut
     }
 
     /// "2026-10-01": the quota starts over on that day.

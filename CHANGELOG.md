@@ -5,6 +5,15 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The AI Usage widget picks up a new sign-in by itself. While a card says
+  "Sign-in expired" or "Not signed in", the widget re-reads the service's
+  credentials every 20 seconds instead of waiting for the five-minute refresh or a
+  click, and asks the API again only once the token differs from the one it refused.
+
 ## [1.4.0] - 2026-09-17
 
 ### Added

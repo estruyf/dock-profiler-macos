@@ -235,9 +235,10 @@ leave on your Mac.
 - **Claude** — Claude Code's OAuth token, from the `Claude Code-credentials` item in
   your Keychain (or `~/.claude/.credentials.json`), sent to Anthropic's OAuth usage
   endpoint. The token is only read, never refreshed — refreshing it from outside would
-  sign Claude Code out. If it has expired, the card says so; run `claude` once and it
-  comes back. Reading the item brings up macOS's Keychain dialog the first time; **Always
-  Allow** settles it for that build of the app.
+  sign Claude Code out. If it has expired, the card says so; run `claude` once and the
+  card picks up the new sign-in by itself within half a minute. Reading the item brings
+  up macOS's Keychain dialog the first time; **Always Allow** settles it for that build
+  of the app.
 - **Copilot** — the GitHub token the Copilot extensions for VS Code and Xcode keep in
   `~/.config/github-copilot/apps.json`, sent to the endpoint those editors ask for the
   same numbers (`copilot_internal/user`). Sign in to Copilot in either editor and the

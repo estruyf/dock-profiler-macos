@@ -9,7 +9,9 @@ Dock Profiler asks for **no privacy permissions** for what it does itself. It re
 writes `com.apple.dock`, sets the desktop picture through `NSWorkspace`, and registers
 its shortcut through Carbon hot keys — none of which need Accessibility, Screen
 Recording or Automation access. A few widgets talk to other apps or read protected
-folders, and macOS asks about those the first time they do.
+folders, and macOS asks about those the first time they do. The one exception is
+notification badges on a combined dock's app tiles, which are read from the macOS Dock
+through Accessibility — an option that is off until you switch it on.
 
 | Permission | Needed for | Prompted |
 | --- | --- | --- |
@@ -19,6 +21,8 @@ folders, and macOS asks about those the first time they do.
 | Automation → Finder | Empty Trash from the Trash widget | Once, the first time you empty it |
 | Files and Folders | The Trash widget counting what is in the Trash; the Folder widget reading a protected folder such as Downloads | Once per folder |
 | Keychain | The AI Usage widget reading Claude Code's token from the `Claude Code-credentials` item | Once per build, with Always Allow |
+| Bluetooth | The Accessories widget reading the charge of accessories from other makers — a Logitech mouse, headphones — over the Bluetooth battery service. Apple's accessories need nothing | Once, when an Accessories widget first appears |
+| Accessibility | Notification badges on a combined dock's app tiles, read from the macOS Dock's own tiles | When **Show notification badges on app tiles** is switched on; macOS shows its dialog once, after that it is granted under Privacy & Security → Accessibility |
 | Login item | Launch at login | Settings toggle (`SMAppService`) |
 
 ## The AI Usage widget

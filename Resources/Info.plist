@@ -84,6 +84,8 @@
 	</array>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Dock Profiler controls Music, Spotify and Finder for the Now Playing and Trash widgets.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Dock Profiler reads the battery level of Bluetooth accessories — a mouse, headphones — for the Accessories widget.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Elio Struyf. MIT License.</string>
 </dict>

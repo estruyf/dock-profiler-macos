@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var badges = DockBadgeMonitor.shared
     @EnvironmentObject private var store: ProfileStore
 
     var body: some View {
@@ -36,6 +37,13 @@ struct SettingsView: View {
                     )
                     .font(.caption)
                     .foregroundStyle(.orange)
+                } else if settings.switcherShortcut?.togglesDockHiding == true {
+                    Label(
+                        "⌥⌘D is macOS's shortcut for hiding the Dock, and it keeps doing that alongside opening the switcher. Try a different one.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
                 }
                 Text("Press it anywhere to open a Spotlight-style window, type a few letters and press Return to switch profile.")
                     .font(.caption)
@@ -51,6 +59,24 @@ struct SettingsView: View {
                 Text("When you drag an app into or out of the Dock, the profile you last activated is updated to match.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            Section("Permissions") {
+                LabeledContent("Accessibility") {
+                    if badges.isTrusted {
+                        Label("Allowed", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Button("Open Accessibility Settings…") {
+                            badges.requestAccess()
+                            DockBadgeMonitor.openAccessibilitySettings()
+                        }
+                    }
+                }
+                Text("Optional. Lets a custom dock show the Dock's notification badges on its app tiles; they are read from the macOS Dock and nothing else is. Every other permission is asked for in place, by the widget that needs it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("Storage") {
@@ -71,6 +97,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { badges.refreshTrust() }
         .toolbar { toolbarContent }
     }
 

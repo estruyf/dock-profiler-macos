@@ -8,6 +8,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     case clock
     case date
     case battery
+    case accessories
     case agents
     case nowPlaying
     case profiles
@@ -24,6 +25,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .clock: return "Clock"
         case .date: return "Date"
         case .battery: return "Battery"
+        case .accessories: return "Accessories"
         case .agents: return "Agents"
         case .nowPlaying: return "Now Playing"
         case .profiles: return "Profiles"
@@ -40,6 +42,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .clock: return "clock"
         case .date: return "calendar"
         case .battery: return "battery.75percent"
+        case .accessories: return "airpodspro"
         case .agents: return "sparkles.rectangle.stack"  // drawn as Lucide's bot in the UI; see BotGlyph
         case .nowPlaying: return "music.note"
         case .profiles: return "square.grid.2x2"
@@ -56,6 +59,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .clock: return "Hours and minutes"
         case .date: return "Weekday and day"
         case .battery: return "Charge and charging"
+        case .accessories: return "AirPods, keyboard, mouse and trackpad batteries"
         case .agents: return "Agent Frame sessions"
         case .nowPlaying: return "Music or Spotify"
         case .profiles: return "Switch Dock Profiler profiles"
@@ -70,7 +74,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     /// Widgets that carry settings of their own, shown on their card in the editor.
     var isConfigurable: Bool {
         switch self {
-        case .folderStack, .appStack, .agents, .nowPlaying, .aiUsage: return true
+        case .folderStack, .appStack, .accessories, .agents, .nowPlaying, .aiUsage: return true
         default: return false
         }
     }
@@ -125,6 +129,31 @@ enum UsageLayout: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the Accessories widget draws each battery: a tile the size of an app icon
+/// with the device's icon inside a ring that empties with it.
+enum AccessoryLayout: String, Codable, CaseIterable, Identifiable {
+    /// The ring, with the level under it.
+    case ring
+    /// The ring alone.
+    case ringOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ring: return "Ring and level"
+        case .ringOnly: return "Ring"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .ring: return "as rings with their level"
+        case .ringOnly: return "as rings"
+        }
+    }
+}
+
 /// Where a widget sits among the apps when the dock is combined. Anchoring to an
 /// app's path rather than its position means the widget stays next to that app
 /// when the Dock is rearranged underneath the profile (auto-save replaces the app
@@ -149,6 +178,12 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     var apps: [DockTile] = []
     /// Agents: one tile with a count that opens into the list, rather than a chip per session.
     var stacked: Bool = false
+    /// Accessories: how each battery is drawn, which accessories are left out, and
+    /// whether this Mac's own battery sits among them. Accessories are shown unless
+    /// hidden, so a new one appears as soon as it connects.
+    var accessoryLayout: AccessoryLayout = .ring
+    var hiddenAccessoryIDs: [String] = []
+    var showsMacBattery: Bool = false
     /// Now playing: previous and next buttons beside the track.
     var showsControls: Bool = false
     /// AI usage: how the allowances are drawn, and which services are tracked, in order.
@@ -180,6 +215,10 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             return apps.isEmpty ? "No apps yet" : apps.map(\.label).joined(separator: ", ")
         case .agents:
             return stacked ? "One tile that opens into the sessions" : kind.summary
+        case .accessories:
+            var shown = hiddenAccessoryIDs.isEmpty ? "Every accessory" : "Every accessory but \(hiddenAccessoryIDs.count)"
+            if showsMacBattery { shown += " and this Mac" }
+            return "\(shown), \(accessoryLayout.summary)"
         case .nowPlaying:
             return showsControls ? "Music or Spotify, with skip buttons" : kind.summary
         case .aiUsage:
@@ -195,6 +234,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
         case id, kind, anchor, path, apps, stacked, showsControls, usageLayout, usageServices
+        case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
     }
 
     init(from decoder: Decoder) throws {
@@ -208,6 +248,12 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls) ?? false
         usageLayout = try container.decodeIfPresent(UsageLayout.self, forKey: .usageLayout) ?? .rings
         usageServices = try container.decodeIfPresent([UsageService].self, forKey: .usageServices) ?? UsageService.allCases
+        // A layout this build does not know — from a newer one, or an earlier name —
+        // falls back to the default rather than making the whole file unreadable.
+        accessoryLayout = (try? container.decodeIfPresent(String.self, forKey: .accessoryLayout))
+            .flatMap(AccessoryLayout.init(rawValue:)) ?? .ring
+        hiddenAccessoryIDs = try container.decodeIfPresent([String].self, forKey: .hiddenAccessoryIDs) ?? []
+        showsMacBattery = try container.decodeIfPresent(Bool.self, forKey: .showsMacBattery) ?? false
     }
 }
 
@@ -446,6 +492,9 @@ struct CustomDockOptions: Codable, Hashable {
     var magnifiedSize: Double = 84
     /// Apps that are running but not pinned, after the pinned ones — as the Dock does.
     var showsRunningApps: Bool = false
+    /// The Dock's notification badges on the app tiles. Read from the Dock through
+    /// Accessibility, so it needs that permission — off until asked for.
+    var showsBadges: Bool = false
     var look = DockLook()
     var widgets: [WidgetTile] = []
 
@@ -587,7 +636,7 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, look, widgets
+        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, showsBadges, look, widgets
     }
 
     init(from decoder: Decoder) throws {
@@ -605,6 +654,7 @@ extension CustomDockOptions {
         magnification = try container.decodeIfPresent(Bool.self, forKey: .magnification) ?? defaults.magnification
         magnifiedSize = try container.decodeIfPresent(Double.self, forKey: .magnifiedSize) ?? defaults.magnifiedSize
         showsRunningApps = try container.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? defaults.showsRunningApps
+        showsBadges = try container.decodeIfPresent(Bool.self, forKey: .showsBadges) ?? defaults.showsBadges
         look = try container.decodeIfPresent(DockLook.self, forKey: .look) ?? defaults.look
         widgets = try container.decodeIfPresent([WidgetTile].self, forKey: .widgets) ?? defaults.widgets
     }

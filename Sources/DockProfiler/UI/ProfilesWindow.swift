@@ -90,11 +90,6 @@ struct ProfilesWindow: View {
                 }
                 .onMove { store.move(fromOffsets: $0, toOffset: $1) }
             }
-
-            Section {
-                Label("Settings", systemImage: "gearshape")
-                    .tag(SidebarItem.settings)
-            }
         }
         // A .dockprofile dropped on the list comes in as a profile.
         .dropDestination(for: URL.self) { urls, _ in
@@ -104,31 +99,75 @@ struct ProfilesWindow: View {
             return true
         }
         .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 8) {
-                Menu {
-                    Button("Import…") { ProfileSharing.importFromPanel() }
-                } label: {
-                    Label("New from current Dock", systemImage: "plus")
-                } primaryAction: {
-                    let profile = store.createProfile(named: newProfileName())
-                    selection = .profile(profile.id)
-                    router.pendingRename = profile.id
-                }
-                .controlSize(.small)
-                .fixedSize()
-                Spacer()
-                Button {
-                    if let profile = store.profile(selectedProfileID) { requestDelete(profile) }
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .controlSize(.small)
-                .disabled(selectedProfileID == nil)
-                .help("Delete the selected profile")
+            VStack(spacing: 0) {
+                settingsRow
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+                Divider()
+                profileActions
             }
-            .padding(10)
             .background(.bar)
         }
+    }
+
+    /// Settings sits under the profiles, pinned to the bottom of the sidebar, with
+    /// the version beneath its name — the place people look for it in Mail and Notes.
+    private var settingsRow: some View {
+        let selected = selection == .settings
+        return Button {
+            selection = .settings
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(selected ? .white : .secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Settings")
+                    Text(AppInfo.version.map { "Version \($0)" } ?? "Development build")
+                        .font(.caption)
+                        .foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(selected ? .white : .primary)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(selected ? Color.accentColor : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// New, import and delete, along the bottom edge.
+    private var profileActions: some View {
+        HStack(spacing: 8) {
+            Menu {
+                Button("Import…") { ProfileSharing.importFromPanel() }
+            } label: {
+                Label("New from current Dock", systemImage: "plus")
+            } primaryAction: {
+                let profile = store.createProfile(named: newProfileName())
+                selection = .profile(profile.id)
+                router.pendingRename = profile.id
+            }
+            .controlSize(.small)
+            .fixedSize()
+            Spacer()
+            Button {
+                if let profile = store.profile(selectedProfileID) { requestDelete(profile) }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .controlSize(.small)
+            .disabled(selectedProfileID == nil)
+            .help("Delete the selected profile")
+        }
+        .padding(10)
     }
 
     private var placeholder: some View {

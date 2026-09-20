@@ -67,6 +67,7 @@ private struct DockPanelContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(insets)
             .environment(\.dockSettingsAction, openSettings)
+            .environment(\.dockWidgetUpdate, CustomDockWindowController.update)
     }
 }
 
@@ -276,6 +277,15 @@ final class CustomDockWindowController {
         store.update(profile)
     }
 
+    /// A widget's settings changed from its context menu.
+    fileprivate static func update(_ widget: WidgetTile) {
+        let store = ProfileStore.shared
+        guard var profile = store.activeProfile,
+              let index = profile.customDock.widgets.firstIndex(where: { $0.id == widget.id }) else { return }
+        profile.customDock.widgets[index] = widget
+        store.update(profile)
+    }
+
     /// A right-click on the dock: the Custom Dock tab of the profile showing it.
     fileprivate static func openSettings(of profileID: UUID) {
         ManagerWindowController.shared.showCustomDock(of: profileID)
@@ -429,6 +439,7 @@ private final class DockScreenPanel {
                 items: content.items,
                 others: content.others,
                 showsRunningApps: options.mode == .combined && options.showsRunningApps,
+                showsBadges: options.mode == .combined && options.showsBadges,
                 edge: edge,
                 tileSize: options.tileSize,
                 magnificationExtra: options.magnificationExtra,
@@ -560,9 +571,10 @@ private final class DockScreenPanel {
 
         if revealed {
             // Leave a little room around the dock before it slips away again — and
-            // stay while a stack is open from it, since the pointer is up in that panel.
+            // stay while a stack is open from it, since the pointer is up in that
+            // panel, or while a tile is being dragged, possibly off the dock.
             let stackOpen = DockStackController.shared.isOpen && screen.frame.contains(mouse)
-            if shown.insetBy(dx: -24, dy: -24).contains(mouse) || stackOpen {
+            if shown.insetBy(dx: -24, dy: -24).contains(mouse) || stackOpen || DockDrag.inProgress {
                 hideTask?.cancel()
                 hideTask = nil
             } else if hideTask == nil {

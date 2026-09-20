@@ -8,6 +8,7 @@ struct CustomDockOptionsView: View {
     var tint: Color = .blue
 
     @ObservedObject private var accessibility = AccessibilityDisplay.shared
+    @ObservedObject private var badges = DockBadgeMonitor.shared
     /// The displays connected right now, for the per-display positions.
     @State private var screens = NSScreen.screens
 
@@ -34,6 +35,7 @@ struct CustomDockOptionsView: View {
             .disabled(!options.enabled)
             .opacity(options.enabled ? 1 : 0.45)
         }
+        .onAppear { badges.refreshTrust() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             screens = NSScreen.screens
         }
@@ -112,6 +114,19 @@ struct CustomDockOptionsView: View {
                     case .combined:
                         caption("Your apps and widgets in one dock — arrange them in the preview above. The macOS Dock hides itself while this profile is active, and comes back with the next profile that does not stand in for it.")
                         Toggle("Also show apps that are open but not in the profile", isOn: $options.showsRunningApps)
+                        Toggle("Show notification badges on app tiles", isOn: $options.showsBadges)
+                            .onChange(of: options.showsBadges) { _, on in
+                                if on { badges.requestAccess() }
+                            }
+                        if options.showsBadges {
+                            if badges.isTrusted {
+                                caption("Badges are read from the macOS Dock through Accessibility, which Dock Profiler has been granted.")
+                            } else {
+                                caption("Badges are read from the macOS Dock, which takes Accessibility access. Allow Dock Profiler under Privacy & Security → Accessibility; the badges appear once it is granted.")
+                                Button("Open Accessibility Settings…") { DockBadgeMonitor.openAccessibilitySettings() }
+                                    .controlSize(.small)
+                            }
+                        }
                     case .detached:
                         caption("A strip of widgets on its own, beside the macOS Dock.")
                     }
@@ -432,7 +447,7 @@ struct CustomDockOptionsView: View {
                 .foregroundStyle(.tertiary)
             Text(options.mode == .combined ? "No widgets among your apps yet" : "No widgets yet")
                 .font(.system(size: 13, weight: .medium))
-            Text("A clock, the Trash, AirDrop, a folder, a stack of apps, what is playing, your profiles, your coding agents or your AI usage.")
+            Text("A clock, the Trash, AirDrop, a folder, a stack of apps, what is playing, your batteries, your profiles, your coding agents or your AI usage.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -451,7 +466,7 @@ struct CustomDockOptionsView: View {
 
     /// Glanceable things first, then the ones that open into something.
     private static let widgetGroups: [[WidgetKind]] = [
-        [.clock, .date, .battery, .nowPlaying],
+        [.clock, .date, .battery, .accessories, .nowPlaying],
         [.trash, .airDrop, .folderStack, .appStack],
         [.profiles, .agents, .aiUsage],
     ]
@@ -632,6 +647,9 @@ private struct WidgetSettingsCard: View {
     let onRemove: () -> Void
 
     @State private var hovering = false
+    /// For the accessories card: the devices to tick, read while the card is on screen.
+    @ObservedObject private var accessories = AccessoryBatteryMonitor.shared
+    @ObservedObject private var macBattery = BatteryMonitor.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -685,6 +703,8 @@ private struct WidgetSettingsCard: View {
         case .agents:
             Toggle("One tile that opens into the sessions", isOn: $tile.stacked)
                 .controlSize(.small)
+        case .accessories:
+            accessorySettings
         case .nowPlaying:
             Toggle("Show previous and next buttons", isOn: $tile.showsControls)
                 .controlSize(.small)
@@ -693,6 +713,68 @@ private struct WidgetSettingsCard: View {
         default:
             EmptyView()
         }
+    }
+
+    /// How each battery is drawn, and which of them to show: every accessory that
+    /// reports its charge, ticked off one by one, and this Mac's own if wanted.
+    private var accessorySettings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Layout", selection: $tile.accessoryLayout) {
+                ForEach(AccessoryLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: 220)
+            if macBattery.status != nil {
+                Toggle("This Mac", isOn: $tile.showsMacBattery)
+                    .controlSize(.small)
+            }
+            ForEach(accessories.devices) { device in
+                Toggle(isOn: shows(device.id)) {
+                    HStack(spacing: 4) {
+                        Text(device.name)
+                        Text("\(device.level)%")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+                .controlSize(.small)
+            }
+            Text(accessories.devices.isEmpty
+                 ? "No accessory is reporting its charge right now. Apple's report it to macOS; others, like a Logitech mouse, over Bluetooth — macOS asks once whether Dock Profiler may use it. They appear here as they connect."
+                 : "Accessories appear here as they connect, and are shown unless ticked off. Apple's report their charge to macOS; others over Bluetooth, which macOS asks about once.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if accessories.bluetoothDenied {
+                HStack(spacing: 8) {
+                    Text("Bluetooth access is off, so accessories from other makers cannot report their charge.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Open System Settings", action: AccessoryBatteryMonitor.openBluetoothPrivacySettings)
+                        .controlSize(.small)
+                }
+            }
+        }
+        .onAppear { accessories.retain() }
+        .onDisappear { accessories.release() }
+    }
+
+    private func shows(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !tile.hiddenAccessoryIDs.contains(id) },
+            set: { on in
+                if on {
+                    tile.hiddenAccessoryIDs.removeAll { $0 == id }
+                } else if !tile.hiddenAccessoryIDs.contains(id) {
+                    tile.hiddenAccessoryIDs.append(id)
+                }
+            }
+        )
     }
 
     /// How the allowances are drawn, and which services to track.

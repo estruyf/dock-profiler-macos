@@ -1,10 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// First run: one sentence, one button. No tour, no carousel.
+/// First run: one sentence, one button, and the one permission worth granting
+/// up front. No tour, no carousel.
 struct WelcomeView: View {
     @EnvironmentObject private var store: ProfileStore
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var badges = DockBadgeMonitor.shared
+    /// Set once Allow has been pressed: macOS shows its dialog only the first
+    /// time, so from then on the way in is System Settings.
+    @State private var askedForAccessibility = false
     let onFinish: (UUID?) -> Void
 
     var body: some View {
@@ -28,6 +33,10 @@ struct WelcomeView: View {
                 .padding(.horizontal, 34)
                 .padding(.top, 26)
 
+            permissions
+                .padding(.horizontal, 34)
+                .padding(.top, 14)
+
             HStack(spacing: 14) {
                 Button("Skip for now") { onFinish(nil) }
                     .buttonStyle(.plain)
@@ -39,14 +48,68 @@ struct WelcomeView: View {
             }
             .padding(.top, 24)
 
-            Text("Dock Profiler asks for no permissions at all — it reads and writes your Dock, and nothing else.")
+            Text("Nothing else needs a permission: Dock Profiler reads and writes your Dock, and that is all. A widget that talks to Music, Spotify or Finder, or reads a folder, asks on its own the first time.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 500)
                 .padding(.top, 18)
                 .padding(.bottom, 26)
         }
         .frame(width: 620)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { badges.refreshTrust() }
+    }
+
+    // MARK: - Permissions
+
+    /// The one permission the app can ask for ahead of time. Optional: without it
+    /// everything works except the badges.
+    private var permissions: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Accessibility — optional")
+                    .font(.system(size: 15, weight: .medium))
+                Text("Lets a custom dock show the Dock's notification badges — WhatsApp's unread count, Mail's — on its app tiles. Nothing else is read.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if askedForAccessibility, !badges.isTrusted {
+                    Button("Open Accessibility Settings…") { DockBadgeMonitor.openAccessibilitySettings() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 12)
+            if badges.isTrusted {
+                Label("Allowed", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.green)
+                    .padding(.top, 4)
+            } else {
+                Button("Allow…") {
+                    askedForAccessibility = true
+                    badges.requestAccess()
+                }
+                .controlSize(.regular)
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
     }
 
     private var appIcon: some View {
@@ -117,7 +180,7 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text("Press").font(.system(size: 15, weight: .medium))
-                    KeyCap(settings.switcherShortcut?.displayString ?? "⌥⌘D")
+                    KeyCap(settings.switcherShortcut?.displayString ?? KeyCombo.defaultSwitcher.displayString)
                     Text("to switch").font(.system(size: 15, weight: .medium))
                 }
                 Text("Or pick from the menu bar icon. Both do the same thing.")

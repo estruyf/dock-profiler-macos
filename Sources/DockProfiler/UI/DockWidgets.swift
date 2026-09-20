@@ -31,6 +31,8 @@ private struct IconTile<Icon: View>: View {
 /// tile in a column, like the agents' session chips.
 private struct CardButton<Content: View>: View {
     let action: () -> Void
+    /// A square tile whichever way the dock runs; nil follows the dock.
+    var square: Bool? = nil
     @ViewBuilder let content: () -> Content
 
     @Environment(\.dockTileSize) private var size
@@ -42,7 +44,7 @@ private struct CardButton<Content: View>: View {
             content().contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .widgetCard(square: vertical)
+        .widgetCard(square: square ?? vertical)
         .overlay(
             RoundedRectangle(cornerRadius: size * 0.21, style: .continuous)
                 .fill(DockPalette.onSlab.opacity(hovering ? 0.08 : 0))
@@ -311,6 +313,159 @@ struct AgentsStackTile: View {
             ),
             edge: edge
         )
+    }
+}
+
+// MARK: - Accessories
+
+/// The batteries of the wireless accessories on this Mac — AirPods and their
+/// case, a Magic Keyboard, a mouse — and the Mac's own if wanted: a tile the size
+/// of an app icon per device, its icon inside a ring that empties with it, as
+/// the Batteries widget in Notification Centre draws them. Beyond a few, the rest
+/// fold into a menu so the dock does not run away.
+struct AccessoriesWidget: View {
+    let tile: WidgetTile
+
+    @Environment(\.dockTileSize) private var size
+    @Environment(\.dockVertical) private var vertical
+    @ObservedObject private var monitor = AccessoryBatteryMonitor.shared
+    @ObservedObject private var macBattery = BatteryMonitor.shared
+
+    private let shown = 5
+
+    /// What the tile is set to show: this Mac first, then every accessory not ticked off.
+    private var devices: [AccessoryBattery] {
+        var devices = monitor.devices.filter { !tile.hiddenAccessoryIDs.contains($0.id) }
+        if tile.showsMacBattery, let status = macBattery.status {
+            devices.insert(.mac(status), at: 0)
+        }
+        return devices
+    }
+
+    var body: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
+        layout {
+            if devices.isEmpty {
+                AccessoryTile(device: nil, showsLevel: tile.accessoryLayout == .ring)
+            } else {
+                ForEach(devices.prefix(shown)) { device in
+                    AccessoryTile(device: device, showsLevel: tile.accessoryLayout == .ring)
+                }
+                if devices.count > shown {
+                    overflow
+                }
+            }
+        }
+        .onAppear { monitor.retain() }
+        .onDisappear { monitor.release() }
+    }
+
+    private var overflow: some View {
+        Menu {
+            ForEach(devices.dropFirst(shown)) { device in
+                Button {
+                    AccessoryBatteryMonitor.openBluetoothSettings()
+                } label: {
+                    Text("\(device.name) — \(device.detail)")
+                }
+            }
+        } label: {
+            Text("+\(devices.count - shown)")
+                .font(.system(size: size * 0.25, weight: .semibold, design: .rounded))
+                .frame(minWidth: size * 0.5)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .widgetCard(square: true)
+    }
+}
+
+/// A device's icon inside a ring filled to its level, the way macOS draws its
+/// batteries: green, red when about to run out, a bolt on the ring while it
+/// charges; dimmed for the empty state.
+private struct BatteryRing: View {
+    let device: AccessoryBattery?
+    /// The ring's diameter.
+    let diameter: CGFloat
+
+    private var color: Color {
+        guard let device else { return DockPalette.onSlab.opacity(0.35) }
+        return device.level <= 20 && !device.isCharging ? .red : .green
+    }
+
+    var body: some View {
+        let lineWidth = LevelRing.lineWidth(for: diameter)
+        ZStack {
+            LevelRing(fraction: device.map { Double($0.level) / 100 } ?? 0, color: color, lineWidth: lineWidth)
+            Image(systemName: device?.kind.symbolName ?? AccessoryBattery.Kind.headphones.symbolName)
+                .font(.system(size: diameter * 0.4, weight: .medium))
+                .foregroundStyle(device == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
+        }
+        .frame(width: diameter, height: diameter)
+        .overlay(alignment: .topLeading) {
+            if device?.isCharging == true {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: diameter * 0.28, weight: .bold))
+                    .foregroundStyle(.green)
+                    .padding(lineWidth * 0.5)
+                    .background(Circle().fill(DockPalette.slab))
+                    .offset(x: -lineWidth * 0.6, y: -lineWidth * 0.6)
+            }
+        }
+    }
+}
+
+/// The level under a ring.
+private struct LevelLabel: View {
+    let device: AccessoryBattery?
+
+    @Environment(\.self) private var environment
+
+    var body: some View {
+        Text(device.map { "\($0.level)%" } ?? "None")
+            .font(.system(size: environment.scaled(9), weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(color)
+    }
+
+    private var color: Color {
+        guard let device else { return DockPalette.onSlab.opacity(0.6) }
+        return device.level <= 20 && !device.isCharging ? .red : DockPalette.onSlab.opacity(0.85)
+    }
+}
+
+/// One device, or the empty state: a square tile with its ring, and its level
+/// under it if asked for. Clicking opens Bluetooth settings, where the
+/// accessories are.
+private struct AccessoryTile: View {
+    let device: AccessoryBattery?
+    let showsLevel: Bool
+
+    @Environment(\.self) private var environment
+
+    var body: some View {
+        CardButton(action: open, square: true) {
+            VStack(spacing: environment.scaled(2)) {
+                BatteryRing(device: device, diameter: environment.scaled(showsLevel ? 28 : 32))
+                if showsLevel {
+                    LevelLabel(device: device)
+                }
+            }
+        }
+        .disabled(device == nil)
+        .dockTooltip(
+            device.map { "\($0.name) — \($0.detail)" } ?? "No accessories",
+            device == nil ? "AirPods, keyboards, mice and headphones that report their charge appear here" : "Click for Bluetooth settings"
+        )
+    }
+
+    private func open() {
+        DockTooltipController.shared.cancel()
+        AccessoryBatteryMonitor.openBluetoothSettings()
     }
 }
 
@@ -833,75 +988,34 @@ struct AIUsageWidget: View {
 /// A ring filled clockwise from the top to the fraction, the way an Activity ring
 /// is: on a track of its own colour, brightening along the arc, with a soft glow
 /// of the colour behind it so it reads as lit rather than painted.
-struct UsageRing: View {
+/// A ring filled to a fraction, the way macOS draws its batteries: a flat arc
+/// with round ends on a faint track, starting at the top. For allowances and
+/// batteries alike, so the two read as one.
+struct LevelRing: View {
     var fraction: Double
     var color: Color
     var lineWidth: CGFloat
 
+    /// The stroke for a ring of the diameter, the same on every ring.
+    static func lineWidth(for diameter: CGFloat) -> CGFloat { max(2.5, diameter * 0.11) }
+
     private var clamped: Double { max(0, min(1, fraction)) }
 
-    /// The arc runs from a deeper shade at its start to a brighter one at its tip.
-    private var gradient: AngularGradient {
-        let base = NSColor(color)
-        let deep = Color(nsColor: base.blended(withFraction: 0.18, of: .black) ?? base)
-        let bright = Color(nsColor: base.blended(withFraction: 0.38, of: .white) ?? base)
-        return AngularGradient(
-            colors: [deep, color, bright],
-            center: .center,
-            startAngle: .degrees(0),
-            endAngle: .degrees(360 * clamped)
-        )
-    }
-
-    private var bright: Color {
-        let base = NSColor(color)
-        return Color(nsColor: base.blended(withFraction: 0.38, of: .white) ?? base)
-    }
-
     var body: some View {
-        let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-        GeometryReader { geometry in
-            let radius = min(geometry.size.width, geometry.size.height) / 2
-            let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
-            // Where the arc ends, before the ring is turned to start at the top.
-            let angle = 2 * .pi * clamped
-            let tip = CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
-            // As the arc comes round to meet its own start, the tip lies over it,
-            // with a shadow to say so — instead of the bright end meeting the deep
-            // start in a seam.
-            let closing = max(0, (clamped - 0.9) / 0.1)
-            ZStack {
-                Circle()
-                    .stroke(color.opacity(0.18), lineWidth: lineWidth)
-                Circle()
-                    .trim(from: 0, to: clamped)
-                    .stroke(color.opacity(0.55), style: StrokeStyle(lineWidth: lineWidth * 1.5, lineCap: .round))
-                    .blur(radius: lineWidth * 0.9)
-                Circle()
-                    .trim(from: 0, to: clamped)
-                    .stroke(gradient, style: style)
-                // A hairline of light along the inside of the arc, for a little relief.
-                Circle()
-                    .trim(from: 0, to: clamped)
-                    .stroke(.white.opacity(0.35), style: StrokeStyle(lineWidth: lineWidth * 0.18, lineCap: .round))
-                    .padding(lineWidth * 0.32)
-                    .blendMode(.plusLighter)
-                if clamped > 0.02 {
-                    Circle()
-                        .fill(bright)
-                        .frame(width: lineWidth, height: lineWidth)
-                        .shadow(color: .black.opacity(0.45 * closing), radius: lineWidth * 0.35, x: lineWidth * 0.3, y: 0)
-                        .position(tip)
-                }
-            }
-            .rotationEffect(.degrees(-90))
+        ZStack {
+            Circle()
+                .stroke(DockPalette.onSlab.opacity(0.18), lineWidth: lineWidth)
+            Circle()
+                .trim(from: 0, to: clamped)
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
         }
         .animation(.easeOut(duration: 0.5), value: clamped)
     }
 }
 
-/// One service on a card. Blue while there is plenty left, orange under a quarter,
-/// red under a tenth; a dash while there is nothing to show.
+/// One service on a card. Orange, red under a tenth; a dash while there is
+/// nothing to show.
 private struct UsageServiceCard: View {
     let tile: WidgetTile
     let service: UsageService
@@ -919,9 +1033,7 @@ private struct UsageServiceCard: View {
 
     private var tint: Color {
         guard let remaining else { return DockPalette.onSlab.opacity(0.35) }
-        if remaining <= 10 { return .red }
-        if remaining <= 25 { return .orange }
-        return Color(nsColor: .systemBlue)
+        return Self.tint(for: remaining)
     }
 
     private var percentText: String {
@@ -968,24 +1080,27 @@ private struct UsageServiceCard: View {
         }
     }
 
-    /// A ring with the percentage inside, the service under it.
+    /// A ring with the percentage inside, the service under it: the same ring as a
+    /// battery's, with its level. The "%" only comes in once the ring is big
+    /// enough to hold it under the number without crowding.
     private var rings: some View {
-        let side = environment.scaled(vertical ? 26 : 34)
-        let lineWidth = side * 0.13
+        let side = environment.scaled(28)
+        let lineWidth = LevelRing.lineWidth(for: side)
         // The number stays clear of the ring: "100" shrinks to fit the inside.
         let inside = side - lineWidth * 2 - side * 0.12
+        let showsSign = side >= 40 && remaining != nil
         return VStack(spacing: environment.scaled(2)) {
-            UsageRing(fraction: (remaining ?? 0) / 100, color: tint, lineWidth: lineWidth)
+            LevelRing(fraction: (remaining ?? 0) / 100, color: tint, lineWidth: lineWidth)
                 .frame(width: side, height: side)
                 .overlay(
                     VStack(spacing: -2) {
                         Text(percentText)
-                            .font(.system(size: side * (vertical ? 0.42 : 0.36), weight: .semibold, design: .rounded))
+                            .font(.system(size: side * 0.4, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                             .foregroundStyle(remaining == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
-                        if !vertical, remaining != nil {
+                        if showsSign {
                             Text("%")
                                 .font(.system(size: side * 0.2, weight: .semibold, design: .rounded))
                                 .foregroundStyle(DockPalette.onSlab.opacity(0.55))
@@ -1115,9 +1230,7 @@ private struct UsageServiceCard: View {
     }
 
     private static func tint(for remaining: Double) -> Color {
-        if remaining <= 10 { return .red }
-        if remaining <= 25 { return .orange }
-        return Color(nsColor: .systemBlue)
+        remaining <= 10 ? .red : .orange
     }
 
     /// "Resets Thu 12:10 PM · 2h 20m", or "Resets Oct 1 · 14d" for a day.

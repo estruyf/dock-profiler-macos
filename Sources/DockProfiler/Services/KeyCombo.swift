@@ -9,11 +9,26 @@ struct KeyCombo: Codable, Equatable, Hashable {
     /// What to draw for the key itself, captured when the shortcut was recorded.
     var keyLabel: String
 
+    /// ⌃⌥D. Not ⌘⌥D: that is macOS's own shortcut for hiding the Dock, and a hot
+    /// key does not stop the system acting on it too — so it brought the parked
+    /// Dock back from behind a combined custom dock every time the switcher opened.
     static let defaultSwitcher = KeyCombo(
+        keyCode: UInt32(kVK_ANSI_D),
+        carbonModifiers: UInt32(controlKey | optionKey),
+        keyLabel: "D"
+    )
+
+    /// The default before 1.6, kept only so it can be migrated away.
+    static let legacyDefaultSwitcher = KeyCombo(
         keyCode: UInt32(kVK_ANSI_D),
         carbonModifiers: UInt32(optionKey | cmdKey),
         keyLabel: "D"
     )
+
+    /// Whether this is ⌘⌥D, which macOS uses to toggle Dock hiding.
+    var togglesDockHiding: Bool {
+        keyCode == UInt32(kVK_ANSI_D) && carbonModifiers == UInt32(optionKey | cmdKey)
+    }
 
     init(keyCode: UInt32, carbonModifiers: UInt32, keyLabel: String) {
         self.keyCode = keyCode

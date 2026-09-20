@@ -41,7 +41,7 @@ after you have rearranged things by hand.
 ![The menu bar](docs/screenshots/menubar.png)
 
 - **Menu bar** — click the icon and pick a profile.
-- **Quick switcher** — press **⌥⌘D** anywhere and a Spotlight-style window opens:
+- **Quick switcher** — press **⌃⌥D** anywhere and a Spotlight-style window opens:
   type a few letters, `↵` to activate. `⌘1`–`⌘9` jump straight to a profile.
 
   ![The quick switcher](docs/screenshots/switcher.png)
@@ -92,7 +92,8 @@ magnification, auto-hide and a Liquid Glass look on macOS Tahoe.
 
 ![The custom dock, standing in for the macOS Dock](docs/screenshots/custom-dock.png)
 
-Widgets: **Clock**, **Date**, **Battery**, **Now Playing** (Music and Spotify),
+Widgets: **Clock**, **Date**, **Battery**, **Accessories** (AirPods, keyboard, mouse
+and trackpad batteries), **Now Playing** (Music and Spotify),
 **Profiles**, **Trash**, **AirDrop**, **Folder** (a stack of its newest files),
 **App Stack**, **Agents** (your running Claude Code sessions, via
 [Agent Frame](https://github.com/estruyf/vscode-agent-frame)), and **AI Usage** (how
@@ -105,8 +106,9 @@ Everything about it — positions, looks, each widget — is in
 
 None for the core: Dock profiles, wallpaper and the shortcut work without
 Accessibility, Screen Recording or Automation access. A few widgets talk to other apps
-(Music, Spotify, Finder) or read protected folders, and macOS asks about those the first
-time. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
+(Music, Spotify, Finder) or read protected folders, and notification badges on the
+custom dock's tiles need Accessibility — macOS asks about each the first time, and only
+if you use it. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
 
 ## Learn more
 

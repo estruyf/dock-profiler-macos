@@ -358,7 +358,7 @@ struct DockStackView: View {
                 .frame(width: size * 0.45, height: size * 0.45)
                 .frame(width: size, height: size)
         case .ring(let fraction, let color):
-            UsageRing(fraction: fraction, color: color, lineWidth: size * 0.14)
+            LevelRing(fraction: fraction, color: color, lineWidth: size * 0.14)
                 .frame(width: size * 0.8, height: size * 0.8)
                 .frame(width: size, height: size)
         }

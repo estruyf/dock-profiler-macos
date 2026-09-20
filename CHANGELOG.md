@@ -5,6 +5,69 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-20
+
+### Added
+
+- **Widget settings in the context menu.** Right-click a widget on the dock
+  and its settings are there — the folder a stack opens, adding or removing
+  apps in a stack, a layout, the services AI Usage tracks, what the
+  Accessories widget shows — the same ones as on its card in the editor, so
+  the dock can be set up without leaving it.
+- **Accessories widget.** The batteries of your AirPods and their case, Magic
+  Keyboard, mouse and headphones on the custom dock, a tile per device with its
+  icon inside a green ring that empties with it — red when it is about to run
+  out, a bolt while it charges — the way Notification Centre's Batteries widget
+  draws them. Apple's accessories report their charge to macOS itself; others,
+  like a Logitech mouse, over the Bluetooth battery service, for which macOS
+  asks once whether Dock Profiler may use Bluetooth. On its card choose the
+  ring with or without its level, tick off the accessories you do not want,
+  and tick **This Mac** to put the Mac's own battery among them. Click for
+  Bluetooth settings.
+- **Notification badges on the custom dock's app tiles.** A combined dock can
+  show the Dock's own badges — WhatsApp's unread count, Mail's — on its tiles,
+  pinned and running alike. Switch it on with **Show notification badges on
+  app tiles** in the Custom Dock tab. There is no API for another app's
+  badge, so they are read from the macOS Dock's tiles through Accessibility;
+  the option is off until asked for, macOS prompts once, and the tab points to
+  System Settings until access is granted.
+- **Drag a running app into the custom dock to keep it.** With "Also show apps
+  that are open but not in the profile" on, an app after the divider can be
+  held and dragged across it, as in the Dock; let go anywhere before the
+  divider and it joins the profile in that spot. Let go after the divider and
+  it stays where it was.
+- **Remove an app or widget from the custom dock in place.** Hold a tile and
+  carry it off the dock — its slot closes and the tile shows "Remove" — and let
+  go; or right-click it and choose **Remove from Dock**. Both take it out of
+  the profile. Widgets with no menu of their own — clock, date, battery,
+  agents, app stack — now have one, with Remove and the dock's settings.
+- **Permissions on the welcome screen and in Settings.** The welcome screen has
+  an Accessibility card with an Allow button, so the one permission worth
+  granting up front can be granted there; Settings gains a Permissions section
+  that shows whether it is allowed and opens System Settings when it is not.
+
+### Fixed
+
+- **Clicking a running app's tile that had no window did nothing.** Apps such
+  as Claude and WhatsApp keep running after their window is closed, so the
+  tile's dot stays on — rightly — but a click only brought the app forward,
+  with nothing to show. Tiles now open the app the way the Dock does, which
+  makes it put its window back. The running dot also drops an app that is
+  killed or crashes without the usual notification.
+
+### Changed
+
+- **AI Usage in orange.** The rings, bars and numbers are orange — red under a
+  tenth, as before — instead of blue, and the ring is drawn flat, the same ring
+  as the batteries', without the glow and gradient.
+- **Settings moved to the bottom of the sidebar**, pinned under the profiles
+  with the version beneath its name.
+- **The switcher's default shortcut is ⌃⌥D.** It was ⌘⌥D, which is also
+  macOS's shortcut for hiding the Dock — a hot key does not stop the system
+  acting on it, so every press also brought the parked macOS Dock back from
+  behind a combined custom dock. A saved ⌘⌥D is moved to ⌃⌥D, and Settings
+  warns if ⌘⌥D is recorded again.
+
 ## [1.5.2] - 2026-09-20
 
 ### Changed

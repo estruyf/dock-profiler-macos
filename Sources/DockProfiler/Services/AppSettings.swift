@@ -106,7 +106,10 @@ final class AppSettings: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         switcherShortcutEnabled = defaults.bool(forKey: Key.switcherShortcutEnabled)
         if let data = defaults.data(forKey: Key.switcherShortcut) {
-            switcherShortcut = try? JSONDecoder().decode(KeyCombo.self, from: data)
+            let stored = try? JSONDecoder().decode(KeyCombo.self, from: data)
+            // ⌘⌥D was the default until it turned out to un-hide the Dock as well;
+            // nobody picked it on purpose, so a stored one moves to the new default.
+            switcherShortcut = stored == .legacyDefaultSwitcher ? .defaultSwitcher : stored
         } else {
             switcherShortcut = .defaultSwitcher
         }

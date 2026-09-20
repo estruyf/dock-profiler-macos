@@ -17,9 +17,14 @@ goes away, edit the active profile and it updates as you go.
 
 - **Apps and widgets** — one dock holding the profile's apps and its widgets, in the
   order you arrange them in the editor's preview, standing in for the macOS Dock. App
-  tiles launch or bring an app forward, carry the running dot, and offer Hide, Quit and
-  Show in Finder on right-click. Optionally, apps that are open but not in the profile
-  follow after a divider, as the Dock does. While such a profile is active the macOS
+  tiles launch or bring an app forward, carry the running dot, and offer Hide, Quit,
+  Show in Finder and Remove from Dock on right-click. Hold a tile — an app or a widget
+  — and drag it off the dock to remove it, as in the Dock; widgets offer Remove from
+  Dock on right-click too. Optionally, apps that are open but not in the
+  profile follow after a divider, as the Dock does — hold one and drag it across the
+  divider to keep it in the profile, also as the Dock does — and the tiles carry the Dock's notification
+  badges — WhatsApp's unread count, Mail's — which takes Accessibility access (see
+  [Permissions](./permissions.md)). While such a profile is active the macOS
   Dock is parked out of the way (⌘⌥D still toggles it); it comes back with the next
   profile that does not stand in for it, and when Dock Profiler quits.
 - **Widgets only** — a strip of widgets beside the macOS Dock, which keeps doing its
@@ -71,11 +76,24 @@ as you drop. Widgets keep their place next to the app they follow, so auto-save
 rearranging the app list underneath does not scatter them.
 
 Right-click anywhere on the dock for **Custom Dock Settings…**, which opens the profile
-on this tab.
+on this tab. A widget's own settings — the folder a stack opens, the apps in a stack,
+a layout, what an Accessories widget shows — are in its context menu too, so the dock
+can be set up without leaving it.
 
 ## Widgets
 
 - **Clock**, **Date**, **Battery** — the glanceable ones.
+- **Accessories** — the batteries of your AirPods and their case, Magic Keyboard, mouse
+  and headphones, a tile per device with its icon inside a green ring that empties with
+  it — red when it is about to run out, a bolt while it charges — the way the Batteries
+  widget in Notification Centre draws them. Apple's accessories report their charge to
+  macOS itself; others, like a Logitech mouse, over Bluetooth, for which macOS asks
+  once whether Dock Profiler may use it. AirPods only report while they are connected
+  to the Mac — the beacon that lets Notification Centre show them from their open case
+  is the system's alone. On its card in the editor choose **Ring and level** or
+  **Ring** alone, tick off the accessories you do not want, and tick **This Mac** to
+  put the Mac's own battery among them. New accessories appear as they connect. Beyond
+  five the rest fold into a menu. Click for Bluetooth settings.
 - **Now Playing** — the track in Music or Spotify, with its album art. Click to play
   or pause; skip from the context menu, or turn on previous/next buttons on its card.
 - **Profiles** — the active profile; click for the list and switch without going to
@@ -112,8 +130,8 @@ The **AI Usage** widget shows how much of your **Claude** and **GitHub Copilot**
 allowances is left — one card per service, drawn as numbers, rings or bars (pick on its
 card in the editor, along with which services to track). Each card shows the tightest
 of the service's main windows: Claude's 5-hour and weekly limits, Copilot's premium
-requests for the month. Blue while there is plenty, orange under a quarter, red under a
-tenth. Click a card for every window with its reset time and countdown — Claude's
+requests for the month. Orange, red under a tenth, the ring drawn as the battery rings
+are. Click a card for every window with its reset time and countdown — Claude's
 per-model weekly limits included — and refresh or jump to the service's usage page from
 the context menu.
 

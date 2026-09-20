@@ -57,7 +57,10 @@ permission for something the Dock profile itself never needed.
 
 The quick switcher's shortcut is registered through Carbon's `RegisterEventHotKey`, so
 it needs no Accessibility access. If another app already owns the combination, Settings
-says so.
+says so. The default is ⌃⌥D rather than ⌘⌥D: a hot key does not stop macOS acting on
+its own shortcuts, and ⌘⌥D toggles Dock hiding — which brought the parked Dock back
+from behind a combined custom dock every time the switcher opened. A saved ⌘⌥D is moved
+to the new default, and Settings warns if it is recorded again.
 
 ## The custom dock's window
 
@@ -80,6 +83,13 @@ the custom dock sits in front of it.
 **Hide until the pointer reaches its edge** polls the pointer position rather than
 installing an event tap, so it needs no Accessibility permission either.
 
+Notification badges are the one thing that does. No API gives another app's badge;
+only the Dock knows it, and the Dock's own tiles are reachable through Accessibility,
+each with its badge as `AXStatusLabel`. The parked Dock keeps its tiles, so a combined
+dock reads them from there — polled every second and a half while a dock that shows
+badges is on screen, off the main thread, and only once the option is on and access is
+granted. Without access the tiles simply carry no badge.
+
 Per-display positions are stored by the display's own id, so a display keeps its place
 when it is unplugged and plugged back in; a display plugged in later takes the shared
 position until it is given one.
@@ -89,6 +99,7 @@ position until it is given one.
 | Widget | Source |
 | --- | --- |
 | Battery | IOKit power sources |
+| Accessories | Two places: the IORegistry, where Apple accessories that report their charge to macOS sit with `HasBattery` set, and the standard Bluetooth battery service (`180F`) that accessories from other makers offer, read over CoreBluetooth — the Mac already holds the connection, so this only joins it. Both polled every half minute while the widget is on screen, and when the Mac wakes; Bluetooth ones also push a change as it happens |
 | Now Playing | Distributed notifications from Music and Spotify for track changes; AppleScript (in an `osascript` child, off the main thread) for the first read and for play, pause and skip |
 | Trash | `~/.Trash`, watched for changes; AppleScript to Finder for Empty Trash |
 | Folder | The folder's contents, newest first |

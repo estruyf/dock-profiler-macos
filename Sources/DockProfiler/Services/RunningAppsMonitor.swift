@@ -11,6 +11,7 @@ final class RunningAppsMonitor: ObservableObject {
     /// Tiles for every running app, oldest launch first, so the row stays steady.
     @Published private(set) var tiles: [DockTile] = []
     private var tokens: [NSObjectProtocol] = []
+    private var listObservation: NSKeyValueObservation?
 
     private init() {
         refresh()
@@ -20,12 +21,17 @@ final class RunningAppsMonitor: ObservableObject {
                 MainActor.assumeIsolated { self?.refresh() }
             })
         }
+        // The list itself is observable too; watching it as well covers an app that
+        // goes without the notification — one that crashed, or was killed outright.
+        listObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+            Task { @MainActor in self?.refresh() }
+        }
     }
 
     private func refresh() {
         // The Dock only marks apps that could have a Dock tile of their own.
         let apps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil }
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && !$0.isTerminated }
             .sorted { ($0.launchDate ?? .distantPast) < ($1.launchDate ?? .distantPast) }
         bundleIdentifiers = Set(apps.compactMap(\.bundleIdentifier))
 

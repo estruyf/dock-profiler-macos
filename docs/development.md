@@ -62,6 +62,7 @@ Sources/DockProfiler/
   Services/AIUsageMonitor.swift       Claude and Copilot allowances, for the AI usage widget
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
+  Services/DockBadgeMonitor.swift     The Dock's badges through Accessibility, for the tiles
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
   Services/ProfileExchange.swift  .dockprofile export and import, made portable across Macs
   Services/DisplayIdentity.swift  Telling displays apart, for per-display dock positions

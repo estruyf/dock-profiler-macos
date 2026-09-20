@@ -31,7 +31,7 @@ alias play='open "dockprofiler://activate?name=Home"'
 
 ## Keyboard
 
-The quick switcher's global shortcut (**⌥⌘D** by default) works everywhere, without
+The quick switcher's global shortcut (**⌃⌥D** by default) works everywhere, without
 any permission. Change or clear it in Settings → Quick switcher. Inside the switcher:
 type to filter, `↑`/`↓` or `⇥` to move, `↵` to activate, `⌘1`–`⌘9` to jump straight to
 a profile, `esc` to close.

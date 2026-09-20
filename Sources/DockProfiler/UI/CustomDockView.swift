@@ -13,6 +13,11 @@ private struct DockVerticalKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// Whether app tiles carry the Dock's notification badges.
+private struct DockBadgesKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 /// Whether widgets draw a card behind themselves.
 private struct DockTileCardsKey: EnvironmentKey {
     static let defaultValue = true
@@ -22,6 +27,23 @@ private struct DockTileCardsKey: EnvironmentKey {
 /// editor's preview, which is already in the settings.
 private struct DockSettingsActionKey: EnvironmentKey {
     static let defaultValue: (() -> Void)? = nil
+}
+
+/// Takes the tile or widget out of the profile, from its context menu. Set on
+/// each item that can go; nil on a running app that is not pinned.
+private struct DockRemoveActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+/// The widget a context menu belongs to, so its settings can sit in the menu.
+private struct DockWidgetKey: EnvironmentKey {
+    static let defaultValue: WidgetTile? = nil
+}
+
+/// Writes a widget's changed settings back to the profile. Set on the live dock;
+/// nil in the editor's preview, whose cards have the settings already.
+private struct DockWidgetUpdateKey: EnvironmentKey {
+    static let defaultValue: ((WidgetTile) -> Void)? = nil
 }
 
 extension EnvironmentValues {
@@ -35,6 +57,11 @@ extension EnvironmentValues {
         set { self[DockVerticalKey.self] = newValue }
     }
 
+    var dockShowsBadges: Bool {
+        get { self[DockBadgesKey.self] }
+        set { self[DockBadgesKey.self] = newValue }
+    }
+
     var dockTileCards: Bool {
         get { self[DockTileCardsKey.self] }
         set { self[DockTileCardsKey.self] = newValue }
@@ -44,24 +71,179 @@ extension EnvironmentValues {
         get { self[DockSettingsActionKey.self] }
         set { self[DockSettingsActionKey.self] = newValue }
     }
+
+    var dockRemoveAction: (() -> Void)? {
+        get { self[DockRemoveActionKey.self] }
+        set { self[DockRemoveActionKey.self] = newValue }
+    }
+
+    var dockWidget: WidgetTile? {
+        get { self[DockWidgetKey.self] }
+        set { self[DockWidgetKey.self] = newValue }
+    }
+
+    var dockWidgetUpdate: ((WidgetTile) -> Void)? {
+        get { self[DockWidgetUpdateKey.self] }
+        set { self[DockWidgetUpdateKey.self] = newValue }
+    }
 }
 
 // MARK: - Context menus
 
-/// A tile's context menu in the dock: its own items and then, on the live dock,
-/// a way to the dock's settings under a divider. A tile with nothing of its own
-/// still gets the settings item, so a right-click anywhere on the dock finds it.
+/// A tile's context menu in the dock: its own items; for a widget with settings,
+/// those, right there in the menu; then Remove from Dock for one that is in the
+/// profile and, on the live dock, a way to the dock's settings, under a divider.
+/// A tile with nothing of its own still gets those, so a right-click anywhere on
+/// the dock finds them.
 private struct DockContextMenu<Items: View>: ViewModifier {
     let items: Items
 
     @Environment(\.dockSettingsAction) private var openSettings
+    @Environment(\.dockRemoveAction) private var remove
+    @Environment(\.dockWidget) private var widget
+    @Environment(\.dockWidgetUpdate) private var update
+
+    private var hasSettings: Bool { widget?.kind.isConfigurable == true && update != nil }
 
     func body(content: Content) -> some View {
         content.contextMenu {
             items
-            if let openSettings {
-                if Items.self != EmptyView.self { Divider() }
-                Button("Custom Dock Settings…", action: openSettings)
+            if hasSettings, Items.self != EmptyView.self { Divider() }
+            if hasSettings, let widget, let update {
+                WidgetSettingsMenu(tile: widget, update: update)
+            }
+            if remove != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
+            if let remove { Button("Remove from Dock", action: remove) }
+            if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
+        }
+    }
+}
+
+/// A widget's settings as menu items — the same ones its card in the editor has,
+/// so the dock can be set up without leaving it. Each change goes straight back
+/// to the profile.
+private struct WidgetSettingsMenu: View {
+    let tile: WidgetTile
+    let update: (WidgetTile) -> Void
+
+    @ObservedObject private var accessories = AccessoryBatteryMonitor.shared
+    @ObservedObject private var macBattery = BatteryMonitor.shared
+
+    var body: some View {
+        switch tile.kind {
+        case .folderStack:
+            Button("Choose Folder…", action: chooseFolder)
+        case .appStack:
+            Button("Add Apps…", action: chooseApps)
+            if !tile.apps.isEmpty {
+                Menu("Remove App") {
+                    ForEach(tile.apps) { app in
+                        Button(app.label) { edit { $0.apps.removeAll { $0.id == app.id } } }
+                    }
+                }
+            }
+        case .agents:
+            Toggle("One Tile That Opens Into the Sessions", isOn: binding(\.stacked))
+        case .nowPlaying:
+            Toggle("Show Previous and Next Buttons", isOn: binding(\.showsControls))
+        case .aiUsage:
+            Picker("Layout", selection: binding(\.usageLayout)) {
+                ForEach(UsageLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            ForEach(UsageService.allCases) { service in
+                Toggle(service.title, isOn: tracks(service))
+            }
+        case .accessories:
+            Picker("Layout", selection: binding(\.accessoryLayout)) {
+                ForEach(AccessoryLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            if macBattery.status != nil {
+                Toggle("This Mac", isOn: binding(\.showsMacBattery))
+            }
+            ForEach(accessories.devices) { device in
+                Toggle("\(device.name) — \(device.level)%", isOn: shows(device.id))
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func edit(_ change: (inout WidgetTile) -> Void) {
+        var changed = tile
+        change(&changed)
+        update(changed)
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<WidgetTile, Value>) -> Binding<Value> {
+        Binding(
+            get: { tile[keyPath: keyPath] },
+            set: { value in edit { $0[keyPath: keyPath] = value } }
+        )
+    }
+
+    /// Ticking a service on puts it back in its usual place among the others.
+    private func tracks(_ service: UsageService) -> Binding<Bool> {
+        Binding(
+            get: { tile.usageServices.contains(service) },
+            set: { on in
+                edit { tile in
+                    if on {
+                        tile.usageServices = UsageService.allCases.filter { $0 == service || tile.usageServices.contains($0) }
+                    } else {
+                        tile.usageServices.removeAll { $0 == service }
+                    }
+                }
+            }
+        )
+    }
+
+    private func shows(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { !tile.hiddenAccessoryIDs.contains(id) },
+            set: { on in
+                edit { tile in
+                    if on {
+                        tile.hiddenAccessoryIDs.removeAll { $0 == id }
+                    } else if !tile.hiddenAccessoryIDs.contains(id) {
+                        tile.hiddenAccessoryIDs.append(id)
+                    }
+                }
+            }
+        )
+    }
+
+    // The dock never takes focus, so a panel opened from it needs the app brought
+    // forward first, or it comes up behind whatever is in front.
+    private func chooseFolder() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        if let path = tile.path { panel.directoryURL = URL(fileURLWithPath: path) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        edit { $0.path = url.path }
+    }
+
+    private func chooseApps() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Add"
+        guard panel.runModal() == .OK else { return }
+        edit { tile in
+            for url in panel.urls where url.pathExtension == "app" {
+                guard !tile.apps.contains(where: { $0.path == url.path }), let app = DockTile.app(at: url) else { continue }
+                tile.apps.append(app)
             }
         }
     }
@@ -75,6 +257,13 @@ extension View {
 
 // MARK: - The dock
 
+/// Whether a tile is being dragged on any dock. An auto-hiding dock stays put
+/// meanwhile: a tile carried off it to be removed takes the pointer well away.
+@MainActor
+enum DockDrag {
+    static var inProgress = false
+}
+
 /// The custom dock: a translucent slab, like the Dock, holding app tiles and
 /// widgets in one row — or one column, on a left or right edge. Shown live in
 /// `CustomDockWindowController`'s panel and as the preview in the editor.
@@ -82,6 +271,8 @@ struct CustomDockView: View {
     let items: [DockStripItem]
     var others: [DockTile] = []
     var showsRunningApps = false
+    /// The Dock's notification badges on the app tiles, read while the dock is up.
+    var showsBadges = false
     var edge: DockStripEdge = .bottom
     var tileSize: CGFloat = 56
     /// How much a tile under the pointer grows, in points; zero for no magnification.
@@ -105,8 +296,23 @@ struct CustomDockView: View {
     @State private var dragLocation: CGFloat = 0
     /// The order as the drag has it so far; kept after the drop until `items` catches up.
     @State private var pendingOrder: [DockStripItem]?
+    /// The held item and the slot it was lifted from, for the ghost; it may have
+    /// left `pendingOrder` while it is carried off the dock.
+    @State private var heldItem: DockStripItem?
+    @State private var heldSlot: CGRect = .zero
+    /// The held item is off the dock: letting go now removes it, as in the Dock.
+    @State private var removing = false
+    /// The dock's frame in the hosting view, to place mouse events from `dragMonitor`.
+    @State private var frameInHost: CGRect = .zero
+    /// Follows the mouse once a drag has begun. The gesture alone stops at the
+    /// panel's edge, and a removal takes the pointer well past it.
+    @State private var dragMonitor: Any?
+    /// The divider's slot, so a running app dropped before it is pinned.
+    private static let dividerID = UUID()
 
     @Environment(\.colorScheme) private var systemColorScheme
+    /// Set on the live dock only; the editor's preview has none.
+    @Environment(\.dockSettingsAction) private var settingsAction
     @ObservedObject private var accessibility = AccessibilityDisplay.shared
 
     private var vertical: Bool { edge.isVertical }
@@ -126,11 +332,13 @@ struct CustomDockView: View {
                 reorderable(item)
             }
             if showsRunningApps {
+                // A running app being dragged takes a slot in the row as well, but its
+                // view here must live on: the gesture is attached to it.
                 let unpinned = running.unpinnedTiles(excluding: items.compactMap(\.tile))
                 if !unpinned.isEmpty {
-                    divider
+                    divider.background(CenterReporter(id: Self.dividerID, vertical: vertical))
                     ForEach(unpinned) { tile in
-                        AppTileView(tile: tile).modifier(magnify(tile.id))
+                        reorderable(.tile(tile), inRunningSection: true)
                     }
                 }
             }
@@ -151,6 +359,8 @@ struct CustomDockView: View {
         // preview in the editor, whose window keeps the system's.
         .environment(\.colorScheme, style.forcedColorScheme ?? systemColorScheme)
         .environment(\.dockTileCards, look.drawsTileCards)
+        .environment(\.dockShowsBadges, showsBadges)
+        .modifier(BadgeSubscription(active: showsBadges))
         .coordinateSpace(name: "dock")
         .onContinuousHover(coordinateSpace: .named("dock")) { phase in
             guard magnificationExtra > 0, dragging == nil else { return }
@@ -160,6 +370,10 @@ struct CustomDockView: View {
             }
         }
         .onPreferenceChange(TileFrameKey.self) { frames = $0 }
+        .background(GeometryReader { geometry in
+            Color.clear.preference(key: HostFrameKey.self, value: geometry.frame(in: .global))
+        })
+        .onPreferenceChange(HostFrameKey.self) { frameInHost = $0 }
         .onChange(of: items) { pendingOrder = nil }
         .environment(\.dockTileSize, tileSize)
         .environment(\.dockVertical, vertical)
@@ -207,13 +421,18 @@ struct CustomDockView: View {
     /// An item that can be held and dragged along the dock, the Dock's way: press
     /// for a moment, then move. The others shuffle aside as it passes their centres,
     /// and letting go writes the new order back through `onReorder`. A plain click
-    /// still reaches the tile.
-    private func reorderable(_ item: DockStripItem) -> some View {
+    /// still reaches the tile. A running app after the divider drags the same way:
+    /// dropped before the divider it joins the profile, as in the Dock; dropped
+    /// after it, it stays where it was. A pinned app carried off the dock is
+    /// removed from the profile when let go, as in the Dock.
+    private func reorderable(_ item: DockStripItem, inRunningSection: Bool = false) -> some View {
         let held = dragging == item.id
         // While held, the item's slot stays in the row — invisible, shuffling with the
-        // others — and the item itself is drawn as the ghost under the pointer.
+        // others — and the item itself is drawn as the ghost under the pointer. A held
+        // running app has a slot in the row too; that one reports the frame.
+        let reportsFrame = !(held && inRunningSection)
         return itemView(item)
-            .background(CenterReporter(id: item.id, vertical: vertical))
+            .background(reportsFrame ? CenterReporter(id: item.id, vertical: vertical) : nil)
             .opacity(held ? 0 : 1)
             // The tile under the pointer must not act when the drag lets go on it.
             .allowsHitTesting(!held)
@@ -224,15 +443,27 @@ struct CustomDockView: View {
     /// it and kept inside the slab so it is never cut off at the ends.
     @ViewBuilder
     private var ghost: some View {
-        if let dragging, let item = displayedItems.first(where: { $0.id == dragging }) {
+        if dragging != nil, let item = heldItem {
             GeometryReader { geometry in
-                let slot = frames[dragging] ?? .zero
-                let half = (vertical ? slot.height : slot.width) / 2 * 1.08
+                let half = (vertical ? heldSlot.height : heldSlot.width) / 2 * 1.08
                 let length = vertical ? geometry.size.height : geometry.size.width
                 let along = min(max(dragLocation, half), max(half, length - half))
                 itemView(item)
-                    .scaleEffect(1.08)
+                    .scaleEffect(removing ? 0.9 : 1.08)
+                    .opacity(removing ? 0.55 : 1)
+                    .overlay {
+                        if removing {
+                            Text("Remove")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(.black.opacity(0.75)))
+                                .fixedSize()
+                        }
+                    }
                     .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+                    .animation(.easeOut(duration: 0.12), value: removing)
                     .position(
                         x: vertical ? geometry.size.width / 2 : along,
                         y: vertical ? along : geometry.size.height / 2
@@ -250,16 +481,60 @@ struct CustomDockView: View {
                 guard case .second(true, let drag) = value else { return }
                 if dragging != item.id { beginDrag(item) }
                 guard let drag else { return }
-                dragLocation = vertical ? drag.location.y : drag.location.x
-                shuffle(item.id)
+                dragMoved(to: drag.location)
             }
             .onEnded { _ in endDrag() }
     }
 
+    /// The pointer has moved to `point`, in the dock's space.
+    private func dragMoved(to point: CGPoint) {
+        guard let item = heldItem else { return }
+        dragLocation = vertical ? point.y : point.x
+        // Well clear of the slab across the dock, the drag becomes a removal.
+        let across = vertical ? point.x : point.y
+        let slotAcross = vertical ? heldSlot.midX : heldSlot.midY
+        removing = canRemove(item) && abs(across - slotAcross) > tileSize * 0.9
+        shuffle(item.id)
+    }
+
+    /// AppKit keeps sending the drag to the window the mouse went down in, wherever
+    /// the pointer goes; SwiftUI's gesture only reports it inside the window. So
+    /// once a drag has begun the events are read directly, in the hosting view's
+    /// (flipped, top-left) space, and placed against the dock's frame in it.
+    private func installDragMonitor() {
+        removeDragMonitor()
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { event in
+            MainActor.assumeIsolated {
+                guard let host = event.window?.contentView else { return }
+                let inHost = host.convert(event.locationInWindow, from: nil)
+                let point = CGPoint(x: inHost.x - frameInHost.minX, y: inHost.y - frameInHost.minY)
+                if event.type == .leftMouseUp {
+                    dragMoved(to: point)
+                    endDrag()
+                } else {
+                    dragMoved(to: point)
+                }
+            }
+            return event
+        }
+    }
+
+    private func removeDragMonitor() {
+        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+        dragMonitor = nil
+    }
+
     private func beginDrag(_ item: DockStripItem) {
         dragging = item.id
+        DockDrag.inProgress = true
+        installDragMonitor()
+        heldItem = item
+        heldSlot = frames[item.id] ?? .zero
+        removing = false
         dragLocation = centers[item.id] ?? 0
-        pendingOrder = items
+        // A running app lifts out of its section and takes a slot at the end of the
+        // row, just before the divider, until it is carried past a pinned item.
+        pendingOrder = items.contains(where: { $0.id == item.id }) ? items : items + [item]
         pointer = nil
         DockTooltipController.shared.cancel()
         DockStackController.shared.dismiss()
@@ -269,18 +544,35 @@ struct CustomDockView: View {
     /// Since the others shift by the held item's width when it moves, the centre just
     /// passed ends up further away, which keeps the order from flickering back.
     private func shuffle(_ id: UUID) {
-        var order = displayedItems
-        guard let from = order.firstIndex(where: { $0.id == id }) else { return }
-        let target = order.filter { $0.id != id && (centers[$0.id] ?? .infinity) < dragLocation }.count
-        guard target != from else { return }
-        let item = order.remove(at: from)
-        order.insert(item, at: target)
+        guard let item = heldItem else { return }
+        var order = displayedItems.filter { $0.id != id }
+        // Off the dock, the item's slot closes; back over it, the slot reopens
+        // wherever the pointer is.
+        if !removing {
+            let target = order.filter { (centers[$0.id] ?? .infinity) < dragLocation }.count
+            order.insert(item, at: target)
+        }
+        guard order.map(\.id) != displayedItems.map(\.id) else { return }
         withAnimation(.easeInOut(duration: 0.15)) { pendingOrder = order }
     }
 
     private func endDrag() {
-        guard dragging != nil else { return }
-        dragging = nil
+        guard let dragging else { return }
+        self.dragging = nil
+        DockDrag.inProgress = false
+        removeDragMonitor()
+        // A running app is pinned only when let go before the divider — anywhere in
+        // the row, or the gap just before the divider. Elsewhere it goes back.
+        let wasRunning = !items.contains { $0.id == dragging }
+        if wasRunning, removing || dragLocation >= centers[Self.dividerID] ?? .infinity {
+            pendingOrder = nil
+            return
+        }
+        if removing {
+            removing = false
+            remove(dragging)
+            return
+        }
         if let order = pendingOrder, order.map(\.id) != items.map(\.id) {
             onReorder?(order)
             // The new items arrive through the profile; if for any reason they do
@@ -306,17 +598,36 @@ struct CustomDockView: View {
     /// place, and the icons around it still respond to the pointer.
     @ViewBuilder
     private func itemView(_ item: DockStripItem) -> some View {
-        switch item {
-        case .widget(let widget):
-            WidgetTileView(tile: widget)
-        case .tile(let tile):
-            if tile.kind.isSpacer {
-                let gap: CGFloat = tile.kind == .smallSpacer ? 6 : (vertical ? 12 : 24)
-                Color.clear.frame(width: vertical ? 1 : gap, height: vertical ? gap : 1)
-            } else {
-                AppTileView(tile: tile).modifier(magnify(tile.id))
+        // Only what is in the profile can be removed; a running app after the
+        // divider is not in it to begin with.
+        let removable = onReorder != nil && items.contains { $0.id == item.id }
+        Group {
+            switch item {
+            case .widget(let widget):
+                WidgetTileView(tile: widget)
+            case .tile(let tile):
+                if tile.kind.isSpacer {
+                    let gap: CGFloat = tile.kind == .smallSpacer ? 6 : (vertical ? 12 : 24)
+                    Color.clear.frame(width: vertical ? 1 : gap, height: vertical ? gap : 1)
+                } else {
+                    AppTileView(tile: tile).modifier(magnify(tile.id))
+                }
             }
         }
+        .environment(\.dockRemoveAction, removable ? { remove(item.id) } : nil)
+    }
+
+    /// Takes an item out of the profile: Remove from Dock, or a drag off the dock.
+    private func remove(_ id: UUID) {
+        guard items.contains(where: { $0.id == id }) else { return }
+        onReorder?(items.filter { $0.id != id })
+    }
+
+    /// Anything in the profile can be dragged off the live dock. Not in the editor's
+    /// preview, which sits in a window of its own where the drag's geometry differs
+    /// and which has its own remove buttons.
+    private func canRemove(_ item: DockStripItem) -> Bool {
+        onReorder != nil && settingsAction != nil && items.contains { $0.id == item.id }
     }
 }
 
@@ -348,6 +659,11 @@ private struct CenterReporter: View {
             Color.clear.preference(key: TileFrameKey.self, value: [id: geometry.frame(in: .named("dock"))])
         }
     }
+}
+
+private struct HostFrameKey: PreferenceKey {
+    static let defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 private struct TileFrameKey: PreferenceKey {
@@ -411,7 +727,9 @@ private struct AppTileView: View {
 
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockVertical) private var vertical
+    @Environment(\.dockShowsBadges) private var showsBadges
     @ObservedObject private var running = RunningAppsMonitor.shared
+    @ObservedObject private var badges = DockBadgeMonitor.shared
     @State private var hovering = false
 
     var body: some View {
@@ -421,6 +739,7 @@ private struct AppTileView: View {
             layout {
                 icon
                     .frame(width: size - dotRoom, height: size - dotRoom)
+                    .overlay(alignment: .topTrailing) { badge }
                     .scaleEffect(hovering ? 1.08 : 1)
                     .animation(.easeOut(duration: 0.12), value: hovering)
                 Circle()
@@ -451,6 +770,16 @@ private struct AppTileView: View {
         }
     }
 
+    /// The Dock's badge, on the icon's corner as the Dock draws it.
+    @ViewBuilder
+    private var badge: some View {
+        if showsBadges, let label = badges.label(for: tile) {
+            NotificationBadge(label: label)
+                .offset(x: size * 0.06, y: -size * 0.06)
+                .transition(.scale.combined(with: .opacity))
+        }
+    }
+
     private var runningApp: NSRunningApplication? { tile.runningApp }
     private var url: URL? { tile.url }
 
@@ -472,10 +801,47 @@ private struct AppTileView: View {
     }
 }
 
+/// The red count the Dock puts on a tile: white text on red, tall enough to read
+/// at the dock's size, wide enough for the text.
+private struct NotificationBadge: View {
+    let label: String
+
+    @Environment(\.dockTileSize) private var size
+
+    var body: some View {
+        let height = max(14, size * 0.3)
+        Text(label)
+            .font(.system(size: height * 0.62, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(.white)
+            .padding(.horizontal, height * 0.3)
+            .frame(minWidth: height, minHeight: height)
+            .background(Capsule().fill(Color(red: 1, green: 0.23, blue: 0.19)))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.9), lineWidth: max(1, height * 0.08)))
+            .shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
+            .accessibilityLabel("\(label) notifications")
+    }
+}
+
+/// Keeps `DockBadgeMonitor` reading the Dock while a dock that shows badges is up.
+private struct BadgeSubscription: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if active { DockBadgeMonitor.shared.retain() } }
+            .onDisappear { if active { DockBadgeMonitor.shared.release() } }
+            .onChange(of: active) { _, active in
+                active ? DockBadgeMonitor.shared.retain() : DockBadgeMonitor.shared.release()
+            }
+    }
+}
+
 extension DockTile {
     var runningApp: NSRunningApplication? {
         guard let identifier = bundleIdentifier else { return nil }
-        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first { !$0.isTerminated }
     }
 
     var url: URL? {
@@ -483,14 +849,17 @@ extension DockTile {
         return kind == .url ? URL(string: path) : URL(fileURLWithPath: path)
     }
 
-    /// What a click on the tile does: brings a running app forward, launches one
-    /// that is not, or opens the folder or link.
+    /// What a click on the tile does: opens the app — launching it, or bringing a
+    /// running one forward — or opens the folder or link.
+    ///
+    /// A running app goes through `openApplication` too, as the Dock does, rather
+    /// than `activate()`: that only brings the app forward, and an app whose last
+    /// window was closed — Claude, WhatsApp — comes forward with nothing to show.
+    /// Opening it again sends the reopen event that makes it put a window back.
     func open() {
         guard let url else { return }
-        if let app = runningApp {
-            app.unhide()
-            app.activate()
-        } else if kind == .app {
+        if kind == .app {
+            runningApp?.unhide()
             NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         } else {
             NSWorkspace.shared.open(url)
@@ -511,20 +880,23 @@ struct WidgetTileView: View {
     var body: some View {
         Group {
             switch tile.kind {
-            case .clock: ClockWidget().widgetCard(square: vertical)
-            case .date: DateWidget().widgetCard(square: vertical)
-            case .battery: BatteryWidget().widgetCard(square: vertical)
-            case .agents: AgentsWidget(tile: tile)
+            // Widgets with no menu of their own still get Remove and Settings.
+            case .clock: ClockWidget().widgetCard(square: vertical).dockContextMenu {}
+            case .date: DateWidget().widgetCard(square: vertical).dockContextMenu {}
+            case .battery: BatteryWidget().widgetCard(square: vertical).dockContextMenu {}
+            case .accessories: AccessoriesWidget(tile: tile).dockContextMenu {}
+            case .agents: AgentsWidget(tile: tile).dockContextMenu {}
+            case .appStack: AppStackWidget(tile: tile).dockContextMenu {}
             case .nowPlaying: NowPlayingWidget(tile: tile)
             case .profiles: ProfilesWidget(tile: tile)
             case .trash: TrashWidget(tile: tile)
             case .airDrop: AirDropWidget(tile: tile)
             case .folderStack: FolderStackWidget(tile: tile)
-            case .appStack: AppStackWidget(tile: tile)
             case .aiUsage: AIUsageWidget(tile: tile)
             }
         }
         .foregroundStyle(DockPalette.onSlab)
+        .environment(\.dockWidget, tile)
     }
 }
 

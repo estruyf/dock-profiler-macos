@@ -521,6 +521,8 @@ struct ProfileEditorView: View {
                 Button("Duplicate") { store.duplicate(profile.id) }
                 Button("Capture my Dock") { store.captureCurrentDock(into: profile.id) }
                 Divider()
+                Button("Export…") { ProfileSharing.export([profile]) }
+                Divider()
                 Button("Delete", role: .destructive) { store.delete(profile.id) }
             } label: {
                 Image(systemName: "ellipsis")

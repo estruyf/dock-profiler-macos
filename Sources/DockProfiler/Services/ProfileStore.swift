@@ -144,6 +144,29 @@ final class ProfileStore: ObservableObject {
         return copy
     }
 
+    /// Adds profiles read from a file, each under a name no other profile has.
+    /// They keep their colours and glyphs; the ids and dates were made fresh on
+    /// the way in.
+    @discardableResult
+    func add(_ imported: [DockProfile]) -> [DockProfile] {
+        var added: [DockProfile] = []
+        for var profile in imported {
+            profile.name = uniqueName(profile.name)
+            profiles.append(profile)
+            added.append(profile)
+        }
+        if !added.isEmpty { scheduleSave() }
+        return added
+    }
+
+    /// `name`, or `name 2`, `name 3`… when a profile already has it.
+    func uniqueName(_ name: String) -> String {
+        guard profiles.contains(where: { $0.name == name }) else { return name }
+        var index = 2
+        while profiles.contains(where: { $0.name == "\(name) \(index)" }) { index += 1 }
+        return "\(name) \(index)"
+    }
+
     func delete(_ id: UUID) {
         profiles.removeAll { $0.id == id }
         if activeProfileID == id { activeProfileID = nil }

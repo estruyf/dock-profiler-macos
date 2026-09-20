@@ -55,10 +55,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// `dockprofiler://switch`, `dockprofiler://profiles`, `dockprofiler://activate?name=Development`
-    /// so the switcher can also be driven from Shortcuts, Raycast or a script.
+    /// so the switcher can also be driven from Shortcuts, Raycast or a script —
+    /// and `.dockprofile` files opened from Finder, which are imported.
     func application(_ application: NSApplication, open urls: [URL]) {
         MainActor.assumeIsolated {
-            for url in urls { handle(url) }
+            let files = urls.filter(ProfileSharing.isProfileFile)
+            if !files.isEmpty { ProfileSharing.importProfiles(from: files) }
+            for url in urls where !url.isFileURL { handle(url) }
         }
     }
 

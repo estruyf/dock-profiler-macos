@@ -119,6 +119,19 @@ profile does not claim stay exactly as they are.
 The profile you last activated tracks the Dock: drag an app in or out and the profile is
 updated to match. Turn it off in Settings → Active profile.
 
+### Sharing a profile
+
+**Export…** in a profile's menu — the ··· in the editor, or a right-click in the sidebar —
+writes it to a `.dockprofile` file, which is JSON. Hand that to someone and they import
+it with **Import…** under the sidebar's New button, by dropping it on the sidebar, or by
+double-clicking it in Finder. A profile is made to travel: paths under your home folder
+go out as `~/…` and land in theirs, the Dock's own per-Mac bookmarks are left out, an
+app that lives somewhere else on the other Mac is found by its bundle identifier, and
+a wallpaper that is not there is switched off with its path kept, so it is plain what
+was meant. Imported profiles get fresh ids and a name no other profile has, so a file
+can be imported twice. Apps that are not installed at all stay in the profile, marked
+as missing, until they are.
+
 ## The wallpaper
 
 A profile can carry a wallpaper, set when the profile is activated. `NSWorkspace` sets
@@ -289,6 +302,7 @@ Sources/DockProfiler/
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
+  Services/ProfileExchange.swift  .dockprofile export and import, made portable across Macs
   Services/DisplayIdentity.swift  Telling displays apart, for per-display dock positions
   Services/DockWatcher.swift   Notices Dock changes for auto-save
   Services/AppSettings.swift   Preferences + login item

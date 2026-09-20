@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the wallpaper under it for a glass or transparent look.
 - **Custom Dock Settings…** in the dock's context menu. Right-click any tile,
   widget or the slab itself and the profile opens on its Custom Dock tab.
+- **Export and import profiles.** **Export…** in a profile's menu — the ··· in
+  the editor, or a right-click in the sidebar — writes it to a `.dockprofile`
+  file to share. **Import…** under the sidebar's New button reads one back; so
+  does dropping the file on the sidebar, or double-clicking it in Finder. A
+  profile travels well: paths under the home folder go out as `~/…`, the
+  Dock's per-Mac bookmarks are left behind, an app installed somewhere else
+  on the other Mac is found by its bundle identifier — and any widget anchored
+  to it follows — and a wallpaper that is not there is switched off with its
+  path kept. Imported profiles get fresh ids and a name no other profile has.
+
 ## [1.4.1] - 2026-09-18
 
 ### Fixed

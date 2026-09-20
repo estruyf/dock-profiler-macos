@@ -83,6 +83,8 @@ struct ProfilesWindow: View {
                                 if let copy = store.duplicate(profile.id) { selection = .profile(copy.id) }
                             }
                             Divider()
+                            Button("Export…") { ProfileSharing.export([profile]) }
+                            Divider()
                             Button("Delete", role: .destructive) { requestDelete(profile) }
                         }
                 }
@@ -94,16 +96,26 @@ struct ProfilesWindow: View {
                     .tag(SidebarItem.settings)
             }
         }
+        // A .dockprofile dropped on the list comes in as a profile.
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(ProfileSharing.isProfileFile)
+            guard !files.isEmpty else { return false }
+            ProfileSharing.importProfiles(from: files)
+            return true
+        }
         .safeAreaInset(edge: .bottom) {
             HStack(spacing: 8) {
-                Button {
+                Menu {
+                    Button("Import…") { ProfileSharing.importFromPanel() }
+                } label: {
+                    Label("New from current Dock", systemImage: "plus")
+                } primaryAction: {
                     let profile = store.createProfile(named: newProfileName())
                     selection = .profile(profile.id)
                     router.pendingRename = profile.id
-                } label: {
-                    Label("New from current Dock", systemImage: "plus")
                 }
                 .controlSize(.small)
+                .fixedSize()
                 Spacer()
                 Button {
                     if let profile = store.profile(selectedProfileID) { requestDelete(profile) }
@@ -128,10 +140,13 @@ struct ProfilesWindow: View {
                 .font(.title3.weight(.medium))
             Text("Or create one from the Dock you are using right now.")
                 .foregroundStyle(.secondary)
-            Button("New from current Dock") {
-                let profile = store.createProfile(named: newProfileName())
-                selection = .profile(profile.id)
-                router.pendingRename = profile.id
+            HStack(spacing: 10) {
+                Button("New from current Dock") {
+                    let profile = store.createProfile(named: newProfileName())
+                    selection = .profile(profile.id)
+                    router.pendingRename = profile.id
+                }
+                Button("Import…") { ProfileSharing.importFromPanel() }
             }
             .padding(.top, 4)
         }

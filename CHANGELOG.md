@@ -5,6 +5,20 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-09-20
+
+### Changed
+
+- **The README is for users now.** It covers what the app is, installing it,
+  the first run, switching, what a profile holds and the custom dock, and
+  links out for the rest. The detail moved into `docs/`: the custom dock and
+  its widgets, automation with the `dockprofiler://` scheme, permissions and
+  privacy, how activation works and where data lives, and building and
+  releasing.
+- **Screenshots of the custom dock**, as a row and as a column, rendered by
+  the same script as the others. The profile manager shot is regenerated with
+  a custom dock on the demo profile, so it shows the Custom Dock tab.
+
 ## [1.5.1] - 2026-09-20
 
 ### Fixed

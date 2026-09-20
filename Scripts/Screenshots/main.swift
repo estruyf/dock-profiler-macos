@@ -16,6 +16,27 @@ private struct StoreFile: Encodable {
     var activeProfileID: UUID?
 }
 
+/// The custom dock the shots use: the glanceable widgets plus the Trash and a
+/// Downloads stack — the ones that draw without a player, a sign-in or an agent
+/// running on this Mac.
+@MainActor
+func demoDock(mode: CustomDockMode) -> CustomDockOptions {
+    var dock = CustomDockOptions()
+    dock.enabled = true
+    dock.mode = mode
+    dock.alignment = .center
+    var downloads = WidgetTile(kind: .folderStack)
+    downloads.path = NSHomeDirectory() + "/Downloads"
+    dock.widgets = [
+        WidgetTile(kind: .clock),
+        WidgetTile(kind: .date),
+        WidgetTile(kind: .battery),
+        WidgetTile(kind: .trash),
+        downloads,
+    ]
+    return dock
+}
+
 @MainActor
 func writeDemoProfiles() {
     func tiles(_ paths: [String]) -> [DockTile] {
@@ -36,6 +57,7 @@ func writeDemoProfiles() {
         "/Applications/Slack.app",
         "/System/Applications/Notes.app",
     ])
+    development.customDock = demoDock(mode: .combined)
 
     var design = DockProfile(name: "Design")
     design.color = .pink
@@ -187,7 +209,7 @@ func run() {
 
     if let manager = snapshot(
         ProfilesWindow().environmentObject(store),
-        appearance: .aqua, size: NSSize(width: 980, height: 620), titled: true
+        appearance: .aqua, size: NSSize(width: 1080, height: 640), titled: true
     ) {
         write(compose(manager, padding: 56, top: day.0, bottom: day.1), named: "manager.png")
     }
@@ -207,6 +229,30 @@ func run() {
         appearance: .darkAqua, size: nil, titled: false
     ) {
         write(compose(menuBar, padding: 48, top: dusk.0, bottom: dusk.1), named: "menubar.png")
+    }
+
+    // The custom dock, as the panel draws it: the Development profile's apps and
+    // widgets in one row, dark glass, and the same dock stood on its side.
+    if let development = store.profiles.first(where: { $0.name == "Development" }) {
+        var look = DockLook()
+        look.style = .dark
+        if let dock = snapshot(
+            CustomDockView(items: development.appRow, edge: .bottom, tileSize: 56, look: look)
+                .padding(24),
+            appearance: .darkAqua, size: nil, titled: false
+        ) {
+            write(compose(dock, padding: 40, top: dusk.0, bottom: dusk.1), named: "custom-dock.png")
+        }
+
+        var light = DockLook()
+        light.style = .light
+        if let column = snapshot(
+            CustomDockView(items: development.appRow, edge: .leading, tileSize: 48, look: light)
+                .padding(24),
+            appearance: .aqua, size: nil, titled: false
+        ) {
+            write(compose(column, padding: 40, top: day.0, bottom: day.1), named: "custom-dock-column.png")
+        }
     }
 
     if let welcome = snapshot(

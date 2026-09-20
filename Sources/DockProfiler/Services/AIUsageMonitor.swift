@@ -349,25 +349,68 @@ enum ClaudeUsageSource {
 
     /// The Keychain item belongs to Claude Code, so the first read brings up macOS's
     /// "wants to use your confidential information" dialog; "Always Allow" settles it.
+    ///
+    /// There can be more than one item under the name — an older sign-in, or one
+    /// holding only MCP server logins, left beside the current one — so every match
+    /// is read, newest first, and the first with a live token wins. Asking for a
+    /// single match could hand back the stale one and call a signed-in Mac signed out.
     private static func keychainToken() throws -> String? {
+        // The secrets cannot come back for several items at once, so the items are
+        // listed first — attributes and a reference each — and read one by one.
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnAttributes as String: true,
+            kSecReturnRef as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         switch status {
         case errSecSuccess:
-            guard let data = result as? Data else { return nil }
-            return try token(in: data)
+            break
         case errSecItemNotFound:
             return nil
-        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed:
-            throw UsageError.keychainDenied
         default:
-            throw UsageError.badResponse("Keychain error \(status)")
+            throw failure(status)
+        }
+        let items = (result as? [[String: Any]] ?? []).sorted {
+            let left = $0[kSecAttrModificationDate as String] as? Date ?? .distantPast
+            let right = $1[kSecAttrModificationDate as String] as? Date ?? .distantPast
+            return left > right
+        }
+        // An expired token only counts when no item has a live one.
+        var expired: Error?
+        for item in items {
+            guard let reference = item[kSecValueRef as String] else { continue }
+            let read: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecMatchItemList as String: [reference],
+                kSecReturnData as String: true,
+            ]
+            var data: CFTypeRef?
+            let status = SecItemCopyMatching(read as CFDictionary, &data)
+            guard status == errSecSuccess else {
+                if status == errSecItemNotFound { continue }
+                throw failure(status)
+            }
+            guard let data = data as? Data else { continue }
+            do {
+                if let token = try token(in: data) { return token }
+            } catch {
+                expired = error
+            }
+        }
+        if let expired { throw expired }
+        return nil
+    }
+
+    private static func failure(_ status: OSStatus) -> Error {
+        switch status {
+        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed:
+            return UsageError.keychainDenied
+        default:
+            return UsageError.badResponse("Keychain error \(status)")
         }
     }
 

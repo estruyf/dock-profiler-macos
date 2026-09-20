@@ -5,6 +5,17 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-09-20
+
+### Fixed
+
+- The AI Usage widget no longer reports "Not signed in" on a Mac that is
+  signed in to Claude Code. The Keychain can hold more than one
+  `Claude Code-credentials` item — an older sign-in, or one carrying only MCP
+  server logins, left beside the current one — and the widget asked for a
+  single match, so it could pick the stale one. It now reads every item,
+  newest first, and uses the first with a live token.
+
 ## [1.5.0] - 2026-09-20
 
 ### Added

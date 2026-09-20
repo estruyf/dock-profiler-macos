@@ -260,6 +260,36 @@ enum DockStripAlignment: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Where the dock sits on a screen: its edge and, along a top or bottom edge, the
+/// end it hugs.
+struct DockPlacement: Codable, Hashable {
+    var edge: DockStripEdge = .bottom
+    var alignment: DockStripAlignment = .trailing
+
+    /// "Bottom, right" — or just "Left" for a side edge, which is always centred.
+    var title: String {
+        edge.isVertical ? edge.title : "\(edge.title), \(alignment.title.lowercased())"
+    }
+}
+
+/// Which displays the dock is drawn on.
+enum DockDisplays: String, Codable, CaseIterable, Identifiable {
+    /// The main display — the one with the menu bar, where the macOS Dock lives.
+    case main
+    /// Every display, each with a dock of its own on the same edge, or one it is
+    /// given in `CustomDockOptions.displayPlacements`.
+    case all
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .main: return "Main display"
+        case .all: return "All displays"
+        }
+    }
+}
+
 /// How the slab is drawn: the material behind the tiles, and whether the dock
 /// keeps its own appearance regardless of the system's.
 enum DockStyle: String, Codable, CaseIterable, Identifiable {
@@ -398,6 +428,13 @@ struct CustomDockOptions: Codable, Hashable {
     var mode: CustomDockMode = .detached
     var edge: DockStripEdge = .bottom
     var alignment: DockStripAlignment = .trailing
+    var displays: DockDisplays = .main
+    /// Displays with a position of their own, keyed by `NSScreen.persistentID` so
+    /// a display keeps its place when it is unplugged and plugged back in. Every
+    /// other display takes `edge` and `alignment`. Two side-by-side displays can
+    /// then keep their docks on the outer edges, leaving the shared edge clear
+    /// for the pointer to cross.
+    var displayPlacements: [String: DockPlacement] = [:]
     /// Slides off screen until the pointer reaches its edge.
     var autohide: Bool = false
     /// While hidden, a slim mark stays on the edge so you know the dock is there.
@@ -413,6 +450,27 @@ struct CustomDockOptions: Codable, Hashable {
     var widgets: [WidgetTile] = []
 
     var isCombined: Bool { enabled && mode == .combined }
+
+    /// The position every display takes unless it has one of its own.
+    var placement: DockPlacement {
+        get { DockPlacement(edge: edge, alignment: alignment) }
+        set { edge = newValue.edge; alignment = newValue.alignment }
+    }
+
+    /// Where the dock sits on `screen`: its own position when it has one and the
+    /// dock is on every display, otherwise the shared one.
+    func placement(for screen: NSScreen) -> DockPlacement {
+        guard displays == .all, let key = screen.persistentID, let own = displayPlacements[key] else {
+            return placement
+        }
+        return own
+    }
+
+    /// The screens the dock is drawn on right now. The main display is always
+    /// first in the list.
+    var screens: [NSScreen] {
+        displays == .all ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
+    }
 
     /// How much a tile under the pointer grows, in points; zero when magnification is off.
     var magnificationExtra: Double { magnification ? max(0, magnifiedSize - tileSize) : 0 }
@@ -529,7 +587,7 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, look, widgets
+        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, look, widgets
     }
 
     init(from decoder: Decoder) throws {
@@ -539,6 +597,8 @@ extension CustomDockOptions {
         mode = try container.decodeIfPresent(CustomDockMode.self, forKey: .mode) ?? defaults.mode
         edge = try container.decodeIfPresent(DockStripEdge.self, forKey: .edge) ?? defaults.edge
         alignment = try container.decodeIfPresent(DockStripAlignment.self, forKey: .alignment) ?? defaults.alignment
+        displays = try container.decodeIfPresent(DockDisplays.self, forKey: .displays) ?? defaults.displays
+        displayPlacements = try container.decodeIfPresent([String: DockPlacement].self, forKey: .displayPlacements) ?? defaults.displayPlacements
         autohide = try container.decodeIfPresent(Bool.self, forKey: .autohide) ?? defaults.autohide
         edgeHint = try container.decodeIfPresent(Bool.self, forKey: .edgeHint) ?? defaults.edgeHint
         tileSize = try container.decodeIfPresent(Double.self, forKey: .tileSize) ?? defaults.tileSize

@@ -165,7 +165,12 @@ pointer reaches its edge** slides it off screen and brings it back when the poin
 into the edge where it lives — polling the pointer position, so no Accessibility
 permission. While it is away, a slim mark stays on the edge where it went, so you
 know something is there to open; it brightens a little as the pointer heads its way.
-Turn that off if you would rather have the edge to yourself.
+Turn that off if you would rather have the edge to yourself. **Displays** puts the
+dock on the main display alone or on every display, each with a dock of its own;
+any display can be given an edge and alignment of its own on its row underneath,
+so two displays side by side can keep their docks on the outer edges and leave the
+edge between them clear for the pointer. Right-click anywhere on the dock for
+**Custom Dock Settings…**, which opens the profile on this tab.
 
 Widgets keep their place among the apps by anchoring to the app before them rather than
 to a position, so when the Dock is rearranged underneath the profile (auto-save replaces
@@ -284,6 +289,7 @@ Sources/DockProfiler/
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/ProfileStore.swift  Profiles, activation, JSON persistence
+  Services/DisplayIdentity.swift  Telling displays apart, for per-display dock positions
   Services/DockWatcher.swift   Notices Dock changes for auto-save
   Services/AppSettings.swift   Preferences + login item
   Services/HotKeyManager.swift Carbon global shortcut

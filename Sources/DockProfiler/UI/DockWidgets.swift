@@ -97,7 +97,7 @@ struct FolderStackWidget: View {
             }
         }
         .dockTooltip(tile.title, exists ? "Click for recent files" : "Folder not found")
-        .contextMenu {
+        .dockContextMenu {
             if let url, exists {
                 Button("Open in Finder") { NSWorkspace.shared.open(url) }
             }
@@ -336,7 +336,7 @@ struct TrashWidget: View {
             return failed.count < urls.count
         } isTargeted: { targeted = $0 }
         .dockTooltip("Trash", subtitle)
-        .contextMenu {
+        .dockContextMenu {
             Button("Open Trash") { TrashMonitor.reveal() }
             Button("Empty Trash…") { monitor.emptyAfterConfirming() }
                 .disabled(!monitor.isFull)
@@ -384,7 +384,7 @@ struct AirDropWidget: View {
             Self.send(urls)
         } isTargeted: { targeted = $0 }
         .dockTooltip("AirDrop", "Drop files here to send them to a nearby device")
-        .contextMenu {
+        .dockContextMenu {
             Button("Open AirDrop") { Self.reveal() }
         }
     }
@@ -551,7 +551,7 @@ struct ProfilesWidget: View {
             .fixedSize(horizontal: !vertical, vertical: false)
         }
         .dockTooltip(active?.name ?? "Profiles", "Click to switch profile")
-        .contextMenu {
+        .dockContextMenu {
             Button("Manage Profiles…") { ManagerWindowController.shared.show(selecting: store.activeProfileID) }
         }
     }
@@ -663,7 +663,7 @@ struct NowPlayingWidget: View {
             track.map { "\($0.title)\($0.artist.isEmpty ? "" : " — \($0.artist)")" } ?? "Not playing",
             track.map { "\($0.player.title) · click to \($0.isPlaying ? "pause" : "play")" } ?? "Open Music or Spotify and start something"
         )
-        .contextMenu { menu }
+        .dockContextMenu { menu }
         .onAppear { monitor.retain() }
         .onDisappear { monitor.release() }
     }
@@ -941,7 +941,7 @@ private struct UsageServiceCard: View {
             .opacity(problem != nil && report != nil ? 0.7 : 1)
         }
         .dockTooltip(tooltipTitle, tooltipDetail)
-        .contextMenu {
+        .dockContextMenu {
             Button("Refresh") { monitor.refresh(service) }
                 .disabled(monitor.refreshing.contains(service))
             Button("Open \(service.title) Usage Page") { NSWorkspace.shared.open(service.usagePage) }

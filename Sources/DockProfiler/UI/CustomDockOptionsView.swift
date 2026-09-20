@@ -8,6 +8,8 @@ struct CustomDockOptionsView: View {
     var tint: Color = .blue
 
     @ObservedObject private var accessibility = AccessibilityDisplay.shared
+    /// The displays connected right now, for the per-display positions.
+    @State private var screens = NSScreen.screens
 
     /// Width of the label column, so pickers and sliders line up down the form.
     private let labelWidth: CGFloat = 104
@@ -31,6 +33,9 @@ struct CustomDockOptionsView: View {
             }
             .disabled(!options.enabled)
             .opacity(options.enabled ? 1 : 0.45)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            screens = NSScreen.screens
         }
     }
 
@@ -161,7 +166,61 @@ struct CustomDockOptionsView: View {
                     }
                 }
             }
+            row("Displays") {
+                Picker("Displays", selection: $options.displays) {
+                    ForEach(DockDisplays.allCases) { value in
+                        Text(value.title).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 300)
+            }
+            indented {
+                VStack(alignment: .leading, spacing: 8) {
+                    switch options.displays {
+                    case .main:
+                        caption("On the display with the menu bar, where the macOS Dock lives.")
+                    case .all:
+                        caption("A dock on every display. Each takes the position above unless it is given one of its own — so two displays side by side can keep their docks on the outer edges, leaving the edge between them clear for the pointer.")
+                        if screens.count > 1 {
+                            displayList
+                        } else {
+                            caption("Only one display is connected right now. Others take the position above when they are plugged in, until they are given one here.")
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // MARK: - Per-display positions
+
+    /// One row per connected display, each taking the position above until it is
+    /// given an edge and alignment of its own.
+    private var displayList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(screens, id: \.displayKey) { screen in
+                DisplayPlacementRow(
+                    name: screen.localizedName,
+                    isMain: screen.isMain,
+                    shared: options.placement,
+                    own: ownPlacement(for: screen)
+                )
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    /// The display's own position, or nil while it takes the shared one. Setting
+    /// it starts from the shared position, so turning it on changes nothing until
+    /// a picker does.
+    private func ownPlacement(for screen: NSScreen) -> Binding<DockPlacement?> {
+        let key = screen.displayKey
+        return Binding(
+            get: { options.displayPlacements[key] },
+            set: { options.displayPlacements[key] = $0 }
+        )
     }
 
     // MARK: - Style
@@ -418,6 +477,108 @@ struct CustomDockOptionsView: View {
 private extension Double {
     func clamped(to range: ClosedRange<Double>) -> Double {
         min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+/// A connected display and where its dock sits: the shared position, or one of
+/// its own with its edge and alignment pickers and a diagram of the result.
+private struct DisplayPlacementRow: View {
+    let name: String
+    let isMain: Bool
+    /// The position every display takes unless it has its own.
+    let shared: DockPlacement
+    @Binding var own: DockPlacement?
+
+    private var placement: DockPlacement { own ?? shared }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: isMain ? "menubar.dock.rectangle" : "display")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text(name)
+                    .font(.system(size: 13, weight: .medium))
+                if isMain {
+                    Text("Main")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
+                Spacer()
+                Toggle("Its own position", isOn: Binding(
+                    get: { own != nil },
+                    set: { own = $0 ? shared : nil }
+                ))
+                .controlSize(.small)
+            }
+            if own != nil {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            Text("Edge")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 36, alignment: .trailing)
+                            Picker("Edge", selection: edge) {
+                                ForEach(DockStripEdge.allCases) { edge in
+                                    Text(edge.title).tag(edge)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .frame(maxWidth: 260)
+                        }
+                        HStack(spacing: 8) {
+                            Text("Align")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 36, alignment: .trailing)
+                            if placement.edge.isVertical {
+                                Text("Centred along the \(placement.edge.title.lowercased()) edge")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(height: 20)
+                            } else {
+                                Picker("Align", selection: alignment) {
+                                    ForEach(DockStripAlignment.allCases) { value in
+                                        Text(value.title).tag(value)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                                .controlSize(.small)
+                                .frame(maxWidth: 200)
+                            }
+                        }
+                    }
+                    ScreenDiagram(edge: placement.edge, alignment: placement.alignment)
+                }
+                .padding(.leading, 24)
+            } else {
+                Text(isMain ? "The position above" : "The position above — \(shared.title.lowercased())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 24)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.04))
+        )
+    }
+
+    private var edge: Binding<DockStripEdge> {
+        Binding(get: { placement.edge }, set: { own = DockPlacement(edge: $0, alignment: placement.alignment) })
+    }
+
+    private var alignment: Binding<DockStripAlignment> {
+        Binding(get: { placement.alignment }, set: { own = DockPlacement(edge: placement.edge, alignment: $0) })
     }
 }
 

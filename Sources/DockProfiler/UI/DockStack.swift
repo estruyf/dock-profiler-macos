@@ -84,8 +84,7 @@ final class DockStackController {
         let mouse = NSEvent.mouseLocation
         let window = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0))
         let dock = window.flatMap { CustomDockWindowController.shared.slabFrame(in: $0) ?? $0.frame }
-        let fromDock = window.map { CustomDockWindowController.shared.slabFrame(in: $0) != nil } ?? false
-        panel.appearance = fromDock ? CustomDockWindowController.shared.forcedAppearance : nil
+        panel.appearance = window.flatMap { CustomDockWindowController.shared.forcedAppearance(in: $0) }
         let gap: CGFloat = 5
         let reach: CGFloat = 48
         var origin: NSPoint

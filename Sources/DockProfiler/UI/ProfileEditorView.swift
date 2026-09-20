@@ -54,7 +54,11 @@ struct ProfileEditorView: View {
                 router.pendingRename = nil
                 showingIdentity = true
             }
+            openCustomDockIfAsked()
         }
+        // The editor may already be showing this profile when the dock asks for
+        // its settings, in which case it never reappears.
+        .onChange(of: router.pendingCustomDock) { _, _ in openCustomDockIfAsked() }
         .onDisappear(perform: removeKeyMonitor)
         .toolbar { toolbarContent }
     }
@@ -154,6 +158,12 @@ struct ProfileEditorView: View {
                     + Text(" selected").font(.system(size: 12)).foregroundColor(.secondary)
             }
         }
+    }
+
+    private func openCustomDockIfAsked() {
+        guard router.pendingCustomDock == profile.id else { return }
+        router.pendingCustomDock = nil
+        tab = .customDock
     }
 
     // MARK: - Tabs

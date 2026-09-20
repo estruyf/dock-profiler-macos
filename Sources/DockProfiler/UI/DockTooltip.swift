@@ -49,7 +49,7 @@ final class DockTooltipController {
         let dock = window.flatMap { CustomDockWindowController.shared.slabFrame(in: $0) != nil ? $0.frame : nil }
         // Beside the dock the tip takes the dock's appearance; beside the editor's
         // preview it keeps the editor's.
-        panel.appearance = dock == nil ? nil : CustomDockWindowController.shared.forcedAppearance
+        panel.appearance = window.flatMap { CustomDockWindowController.shared.forcedAppearance(in: $0) }
         // Off the panel when there is one, off the tile itself otherwise.
         let gap: CGFloat = 10
         let above = dock?.maxY ?? tileOnScreen?.maxY ?? mouse.y + 30

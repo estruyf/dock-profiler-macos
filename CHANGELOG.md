@@ -5,6 +5,22 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A dock on every display.** The custom dock's Position section has a
+  **Displays** choice: the main display, as before, or all of them, each with a
+  dock of its own. Every display takes the profile's edge and alignment unless
+  it is given a position of its own on its row underneath — so two displays
+  side by side can keep their docks on the outer edges, leaving the edge between
+  them clear for the pointer to cross. Positions are kept by the display's own
+  id, so a display keeps its place when it is unplugged and plugged back in;
+  a display plugged in later takes the shared position until it is given one.
+  Each dock hides, reveals and leaves its edge mark on its own, and each reads
+  the wallpaper under it for a glass or transparent look.
+- **Custom Dock Settings…** in the dock's context menu. Right-click any tile,
+  widget or the slab itself and the profile opens on its Custom Dock tab.
 ## [1.4.1] - 2026-09-18
 
 ### Fixed

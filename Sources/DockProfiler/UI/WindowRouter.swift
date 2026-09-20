@@ -9,5 +9,8 @@ final class WindowRouter: ObservableObject {
     @Published var pendingRename: UUID?
     /// Bumped when something asks the manager to show Settings.
     @Published var settingsRequest = 0
+    /// Set for a profile so its editor opens on the Custom Dock tab — from a
+    /// right-click on the dock itself.
+    @Published var pendingCustomDock: UUID?
     private init() {}
 }

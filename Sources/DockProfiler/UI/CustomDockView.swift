@@ -18,6 +18,12 @@ private struct DockTileCardsKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+/// Opens the dock's settings, from a right-click on the live dock. Nil in the
+/// editor's preview, which is already in the settings.
+private struct DockSettingsActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
 extension EnvironmentValues {
     var dockTileSize: CGFloat {
         get { self[DockTileSizeKey.self] }
@@ -32,6 +38,38 @@ extension EnvironmentValues {
     var dockTileCards: Bool {
         get { self[DockTileCardsKey.self] }
         set { self[DockTileCardsKey.self] = newValue }
+    }
+
+    var dockSettingsAction: (() -> Void)? {
+        get { self[DockSettingsActionKey.self] }
+        set { self[DockSettingsActionKey.self] = newValue }
+    }
+}
+
+// MARK: - Context menus
+
+/// A tile's context menu in the dock: its own items and then, on the live dock,
+/// a way to the dock's settings under a divider. A tile with nothing of its own
+/// still gets the settings item, so a right-click anywhere on the dock finds it.
+private struct DockContextMenu<Items: View>: ViewModifier {
+    let items: Items
+
+    @Environment(\.dockSettingsAction) private var openSettings
+
+    func body(content: Content) -> some View {
+        content.contextMenu {
+            items
+            if let openSettings {
+                if Items.self != EmptyView.self { Divider() }
+                Button("Custom Dock Settings…", action: openSettings)
+            }
+        }
+    }
+}
+
+extension View {
+    func dockContextMenu<Items: View>(@ViewBuilder items: () -> Items) -> some View {
+        modifier(DockContextMenu(items: items()))
     }
 }
 
@@ -105,6 +143,8 @@ struct CustomDockView: View {
         }
         .padding(padding)
         .background(plate)
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .modifier(SlabContextMenu())
         .overlay(ghost)
         // A forced light or dark style colours the tiles and cards too, not just the
         // slab. The panel sets the same appearance on its window; this covers the
@@ -280,6 +320,22 @@ struct CustomDockView: View {
     }
 }
 
+/// The slab's own context menu, for a right-click between the tiles: just the
+/// settings item, and only on the live dock.
+private struct SlabContextMenu: ViewModifier {
+    @Environment(\.dockSettingsAction) private var openSettings
+
+    func body(content: Content) -> some View {
+        if let openSettings {
+            content.contextMenu {
+                Button("Custom Dock Settings…", action: openSettings)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - Magnification
 
 /// Reports where an item's slot is in the dock, for magnification and reordering.
@@ -378,7 +434,7 @@ private struct AppTileView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .dockTooltip(tile.label, tile.isMissing ? "Moved or deleted" : nil)
-        .contextMenu { menu }
+        .dockContextMenu { menu }
     }
 
     @ViewBuilder

@@ -73,7 +73,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Text("Optional. Lets a custom dock show the Dock's notification badges on its app tiles; they are read from the macOS Dock and nothing else is. Every other permission is asked for in place, by the widget that needs it.")
+                Text("Optional. Lets a custom dock show the Dock's notification badges on its app tiles, read from the macOS Dock, and list an app's open windows in its tile's menu. Nothing else is read. Every other permission is asked for in place, by the widget that needs it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

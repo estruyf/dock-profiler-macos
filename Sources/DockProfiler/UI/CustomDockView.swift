@@ -35,6 +35,12 @@ private struct DockRemoveActionKey: EnvironmentKey {
     static let defaultValue: (() -> Void)? = nil
 }
 
+/// Puts a running app that is not in the profile into it, from its context
+/// menu — the Dock's Keep in Dock. Set on the live dock's running section only.
+private struct DockPinActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
 /// The widget a context menu belongs to, so its settings can sit in the menu.
 private struct DockWidgetKey: EnvironmentKey {
     static let defaultValue: WidgetTile? = nil
@@ -77,6 +83,11 @@ extension EnvironmentValues {
         set { self[DockRemoveActionKey.self] = newValue }
     }
 
+    var dockPinAction: (() -> Void)? {
+        get { self[DockPinActionKey.self] }
+        set { self[DockPinActionKey.self] = newValue }
+    }
+
     var dockWidget: WidgetTile? {
         get { self[DockWidgetKey.self] }
         set { self[DockWidgetKey.self] = newValue }
@@ -90,11 +101,12 @@ extension EnvironmentValues {
 
 // MARK: - Context menus
 
-/// A tile's context menu in the dock: its own items; for a widget with settings,
-/// those, right there in the menu; then Remove from Dock for one that is in the
-/// profile and, on the live dock, a way to the dock's settings, under a divider.
-/// A tile with nothing of its own still gets those, so a right-click anywhere on
-/// the dock finds them.
+/// A tile's context menu in the dock: Remove from Dock for one that is in the
+/// profile and, on the live dock, a way to the dock's settings, first, so they
+/// are found at once; then, under a divider, the tile's own items and, for a
+/// widget with settings, those, right there in the menu. A tile with nothing of
+/// its own still gets the first two, so a right-click anywhere on the dock finds
+/// them.
 private struct DockContextMenu<Items: View>: ViewModifier {
     let items: Items
 
@@ -107,14 +119,14 @@ private struct DockContextMenu<Items: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         content.contextMenu {
+            if let remove { Button("Remove from Dock", action: remove) }
+            if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
+            if remove != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
             items
             if hasSettings, Items.self != EmptyView.self { Divider() }
             if hasSettings, let widget, let update {
                 WidgetSettingsMenu(tile: widget, update: update)
             }
-            if remove != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
-            if let remove { Button("Remove from Dock", action: remove) }
-            if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
         }
     }
 }
@@ -432,6 +444,7 @@ struct CustomDockView: View {
         // running app has a slot in the row too; that one reports the frame.
         let reportsFrame = !(held && inRunningSection)
         return itemView(item)
+            .environment(\.dockPinAction, inRunningSection && onReorder != nil ? { pin(item) } : nil)
             .background(reportsFrame ? CenterReporter(id: item.id, vertical: vertical) : nil)
             .opacity(held ? 0 : 1)
             // The tile under the pointer must not act when the drag lets go on it.
@@ -617,6 +630,13 @@ struct CustomDockView: View {
         .environment(\.dockRemoveAction, removable ? { remove(item.id) } : nil)
     }
 
+    /// Puts a running app into the profile, at the end: Keep in Dock. The same
+    /// place a drag across the divider lands it before it is carried further.
+    private func pin(_ item: DockStripItem) {
+        guard !items.contains(where: { $0.id == item.id }) else { return }
+        onReorder?(items + [item])
+    }
+
     /// Takes an item out of the profile: Remove from Dock, or a drag off the dock.
     private func remove(_ id: UUID) {
         guard items.contains(where: { $0.id == id }) else { return }
@@ -728,6 +748,9 @@ private struct AppTileView: View {
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockVertical) private var vertical
     @Environment(\.dockShowsBadges) private var showsBadges
+    @Environment(\.dockPinAction) private var pin
+    @Environment(\.dockRemoveAction) private var remove
+    @Environment(\.dockSettingsAction) private var openSettings
     @ObservedObject private var running = RunningAppsMonitor.shared
     @ObservedObject private var badges = DockBadgeMonitor.shared
     @State private var hovering = false
@@ -753,7 +776,7 @@ private struct AppTileView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .dockTooltip(tile.label, tile.isMissing ? "Moved or deleted" : nil)
-        .dockContextMenu { menu }
+        .overlay(AppTileMenu(build: buildMenu))
     }
 
     @ViewBuilder
@@ -780,7 +803,6 @@ private struct AppTileView: View {
         }
     }
 
-    private var runningApp: NSRunningApplication? { tile.runningApp }
     private var url: URL? { tile.url }
 
     private func open() {
@@ -788,16 +810,145 @@ private struct AppTileView: View {
         tile.open()
     }
 
-    @ViewBuilder
-    private var menu: some View {
-        if let app = runningApp {
-            Button(app.isHidden ? "Show" : "Hide") { _ = app.isHidden ? app.unhide() : app.hide() }
-            Button("Quit") { app.terminate() }
-            Divider()
+    /// The Dock's menu for an app tile, near enough: its open windows, then
+    /// Options, then Show All Windows, Hide and Quit; for one that is not
+    /// running, Options and Open — after Remove from Dock and the dock's settings,
+    /// which come first. Recent documents are the one thing missing — macOS hands
+    /// an app's list to that app alone. Built afresh on every right-click, so the
+    /// windows are the ones open now.
+    private func buildMenu() -> NSMenu {
+        DockTooltipController.shared.cancel()
+        let menu = NSMenu()
+        // The dock's own items first, where they are found without scrolling past
+        // the windows; the same place `DockContextMenu` gives the widgets.
+        if let remove { menu.addItem("Remove from Dock") { remove() } }
+        if let openSettings { menu.addItem("Custom Dock Settings…") { openSettings() } }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        if tile.kind == .app {
+            let instances = tile.bundleIdentifier.map {
+                NSRunningApplication.runningApplications(withBundleIdentifier: $0).filter { !$0.isTerminated }
+            } ?? []
+            if let app = instances.first {
+                addWindows(of: instances, to: menu)
+                menu.addItem(options)
+                menu.addItem(.separator())
+                menu.addItem("Show All Windows") { AppWindows.showAll(of: app) }
+                menu.addItem(app.isHidden ? "Show" : "Hide") {
+                    for instance in instances { _ = instance.isHidden ? instance.unhide() : instance.hide() }
+                }
+                menu.addItem("Quit") { for instance in instances { instance.terminate() } }
+            } else {
+                menu.addItem(options)
+                menu.addItem(.separator())
+                menu.addItem("Open") { open() }
+            }
+        } else if let url, url.isFileURL {
+            menu.addItem("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
+        // A tile with nothing of its own would end on the separator.
+        if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+        return menu
+    }
+
+    /// The open windows of every running instance of the app, as the Dock lists
+    /// them: a check mark on the one in front, a diamond on a minimized one, and
+    /// choosing one brings it forward — the way to a particular window when an
+    /// app has several. Read through Accessibility; without access, one item
+    /// that leads to it. Ends in a divider when it has anything, so an app with
+    /// no windows up does not start its menu with one.
+    private func addWindows(of instances: [NSRunningApplication], to menu: NSMenu) {
+        guard AppWindows.isAvailable else {
+            menu.addItem("Show Windows Here…") {
+                DockBadgeMonitor.shared.requestAccess()
+                DockBadgeMonitor.openAccessibilitySettings()
+            }
+            menu.addItem(.separator())
+            return
+        }
+        let windows = AppWindows.windows(of: instances)
+        for window in windows {
+            let item = menu.addItem(window.title) { window.raise() }
+            if window.isFocused {
+                item.state = .on
+            } else if window.isMinimized {
+                // The Dock's diamond, in the check mark's column.
+                item.state = .mixed
+                item.mixedStateImage = NSImage(systemSymbolName: "diamond.fill", accessibilityDescription: "Minimized")?
+                    .withSymbolConfiguration(.init(pointSize: 7, weight: .regular))
+            }
+        }
+        if !windows.isEmpty { menu.addItem(.separator()) }
+    }
+
+    /// The Dock's Options submenu: Keep in Dock for a running app that is not in
+    /// the profile, and Show in Finder.
+    private var options: NSMenuItem {
+        let submenu = NSMenu(title: "Options")
+        if let pin { submenu.addItem("Keep in Dock") { pin() } }
         if let url, url.isFileURL {
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            submenu.addItem("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         }
+        let item = NSMenuItem(title: "Options", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+}
+
+/// An app tile's context menu, from AppKit rather than SwiftUI: SwiftUI builds a
+/// context menu's items once and keeps them, and the list of an app's windows
+/// has to be read again each time the menu opens, as the Dock does. AppKit asks
+/// `menu(for:)` on every right-click. Sits over the tile; a left click, a hover
+/// or a drag goes through to the tile underneath.
+private struct AppTileMenu: NSViewRepresentable {
+    let build: () -> NSMenu
+
+    func makeNSView(context: Context) -> MenuView { MenuView() }
+
+    func updateNSView(_ view: MenuView, context: Context) { view.build = build }
+
+    final class MenuView: NSView {
+        var build: (() -> NSMenu)?
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let event = NSApp.currentEvent, Self.opensMenu(event) else { return nil }
+            return super.hitTest(point)
+        }
+
+        override func menu(for event: NSEvent) -> NSMenu? { build?() }
+
+        // A control-click opens the menu as a right-click does.
+        override func mouseDown(with event: NSEvent) {
+            if Self.opensMenu(event) { rightMouseDown(with: event) } else { super.mouseDown(with: event) }
+        }
+
+        private static func opensMenu(_ event: NSEvent) -> Bool {
+            switch event.type {
+            case .rightMouseDown, .rightMouseUp: return true
+            case .leftMouseDown: return event.modifierFlags.contains(.control)
+            default: return false
+            }
+        }
+    }
+}
+
+/// `NSMenuItem`'s target is weak, so the action lives on the item itself.
+private final class MenuAction: NSObject {
+    let perform: () -> Void
+
+    init(_ perform: @escaping () -> Void) { self.perform = perform }
+
+    @objc func fire(_ sender: Any?) { perform() }
+}
+
+private extension NSMenu {
+    @discardableResult
+    func addItem(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire(_:)), keyEquivalent: "")
+        let target = MenuAction(action)
+        item.target = target
+        item.representedObject = target
+        addItem(item)
+        return item
     }
 }
 

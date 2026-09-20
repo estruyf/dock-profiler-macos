@@ -23,7 +23,7 @@ it — same build either way:
 | `npm run` | What it does |
 | --- | --- |
 | `build:debug` | Quick build, current architecture only |
-| `build` | Universal build (`arm64` + `x86_64`), ad-hoc signed |
+| `build` | Universal build (`arm64` + `x86_64`) |
 | `build:install` | Universal build, copied to /Applications and launched |
 | `build:zip` / `build:dmg` | Universal build, also zipped / made into a disk image |
 | `sign` | Zipped, signed with the Developer ID `CODESIGN_IDENTITY` finds |
@@ -35,8 +35,20 @@ it — same build either way:
 | `cask` | Stamp the Homebrew cask (see below) |
 | `clean` | Remove `.build` and `build` |
 
-`./Scripts/build_app.sh` on its own produces a universal, ad-hoc signed build in
-`build/`. See the header of the script for signing and notarization details.
+`./Scripts/build_app.sh` on its own produces a universal build in `build/`, signed
+with the Apple Development certificate in your keychain if there is one, ad-hoc
+otherwise. The difference matters for the permissions: macOS ties an Accessibility
+grant to the app's signature, and an ad-hoc signature is a hash of the binary that
+changes with every build — so after a rebuild the badges and window lists stop
+working while System Settings still shows Dock Profiler as allowed. A certificate
+keeps the grant. If you have been on ad-hoc builds and the grant has gone stale,
+reset it once and allow the app again:
+
+```sh
+tccutil reset Accessibility dev.eliostruyf.DockProfiler
+```
+
+See the header of the script for signing and notarization details.
 
 The app is a menu bar item (`LSUIElement`), so it has no Dock icon. The profile manager
 opens from the menu bar, or by opening the app again from Finder.

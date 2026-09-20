@@ -5,6 +5,25 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-20
+
+### Added
+
+- **The Dock's menu on the custom dock's app tiles.** Right-click an app and
+  its open windows are listed, across every instance — a check mark on the one
+  in front, a diamond on a minimized one — and choosing one brings it forward,
+  which is the way to a particular window when an app has several. Below them,
+  as in the Dock: Options with Keep in Dock (for a running app after the
+  divider) and Show in Finder, then Show All Windows, Hide and Quit. Remove
+  from Dock and Custom Dock Settings… now come first in every tile's menu,
+  widgets included, so a long window list never pushes them out of reach. The window
+  list is read through Accessibility, the same permission as the badges; until
+  it is granted the menu has a **Show Windows Here…** item that leads to it.
+  Recent documents are the one thing the Dock's menu has that this one cannot:
+  macOS hands an app's list to that app alone.
+- **Open at login on the welcome screen.** The same toggle as in Settings, on
+  the screen a first run sees.
+
 ## [1.6.0] - 2026-09-20
 
 ### Added

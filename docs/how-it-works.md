@@ -90,6 +90,14 @@ dock reads them from there — polled every second and a half while a dock that 
 badges is on screen, off the main thread, and only once the option is on and access is
 granted. Without access the tiles simply carry no badge.
 
+A tile's window list is Accessibility too: each running instance of the app is asked
+for its windows — standard ones only, as the Dock lists them — with their title,
+whether they are minimized and which is in front, when the menu opens; choosing one
+raises it through Accessibility and activates the app. Show All Windows activates the
+app and asks Mission Control for App Exposé, the way the Dock's own item does. The
+Dock's recent documents cannot be had: an app's list is kept by the shared file list
+daemon, which hands it out only to a process signed as that app.
+
 Per-display positions are stored by the display's own id, so a display keeps its place
 when it is unplugged and plugged back in; a display plugged in later takes the shared
 position until it is given one.

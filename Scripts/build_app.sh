@@ -9,6 +9,10 @@
 #   ./Scripts/build_app.sh --dmg        also produce a disk image next to the app
 #   ./Scripts/build_app.sh --notarize   sign, notarize with Apple, staple, and zip
 #
+# Local builds are signed with the Apple Development certificate in your keychain
+# when there is one, ad-hoc otherwise. Ad-hoc is enough to run, but macOS drops the
+# Accessibility and Keychain grants with every rebuild; a certificate keeps them.
+#
 # The version is read from ./package.json. VERSION= overrides it for one-off builds.
 #
 # To sign with a Developer ID for distribution:
@@ -42,6 +46,15 @@ if [ -z "${VERSION:-}" ]; then
   exit 1
 fi
 BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
+# A local build signs with an Apple Development certificate when the keychain
+# has one. macOS ties the Accessibility grant (badges, window lists) and the
+# Keychain's "Always Allow" to the app's signature; an ad-hoc signature is a hash
+# of the binary, new with every build, so each rebuild quietly lost them while
+# System Settings still showed the app as allowed. A certificate keeps them.
+if [ -z "${CODESIGN_IDENTITY:-}" ]; then
+  CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Apple Development: [^"]*\)".*/\1/p' | head -1)"
+fi
 IDENTITY="${CODESIGN_IDENTITY:--}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-dockprofiler}"
 # CI has no stored profile, so credentials can come from the environment instead.
@@ -121,9 +134,13 @@ rm -rf "$ICONSET"
 
 echo "==> Signing with identity: $IDENTITY"
 if [ "$IDENTITY" = "-" ]; then
-  # Ad-hoc, with a stable identifier so the bundle keeps one identity across
-  # rebuilds. Fine for local use; distribution needs a Developer ID below.
+  # Ad-hoc: no certificate in the keychain. Runs fine, but see above — the
+  # permissions granted to it go stale with the next build.
   codesign --force --sign - --identifier dev.eliostruyf.DockProfiler "$APP"
+elif [[ "$IDENTITY" == "Apple Development:"* ]]; then
+  # A development certificate: no timestamp, which needs the network, and no
+  # hardened runtime, which only notarization asks for.
+  codesign --force --sign "$IDENTITY" "$APP"
 else
   # No --deep: Apple discourages it, and this bundle has no nested code.
   # --options runtime (hardened runtime) is required for notarization.

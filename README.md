@@ -106,9 +106,9 @@ Everything about it — positions, looks, each widget — is in
 
 None for the core: Dock profiles, wallpaper and the shortcut work without
 Accessibility, Screen Recording or Automation access. A few widgets talk to other apps
-(Music, Spotify, Finder) or read protected folders, and notification badges on the
-custom dock's tiles need Accessibility — macOS asks about each the first time, and only
-if you use it. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
+(Music, Spotify, Finder) or read protected folders, and notification badges and the
+window list on the custom dock's tiles need Accessibility — macOS asks about each the
+first time, and only if you use it. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
 
 ## Learn more
 

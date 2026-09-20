@@ -17,14 +17,20 @@ goes away, edit the active profile and it updates as you go.
 
 - **Apps and widgets** — one dock holding the profile's apps and its widgets, in the
   order you arrange them in the editor's preview, standing in for the macOS Dock. App
-  tiles launch or bring an app forward, carry the running dot, and offer Hide, Quit,
-  Show in Finder and Remove from Dock on right-click. Hold a tile — an app or a widget
-  — and drag it off the dock to remove it, as in the Dock; widgets offer Remove from
-  Dock on right-click too. Optionally, apps that are open but not in the
-  profile follow after a divider, as the Dock does — hold one and drag it across the
-  divider to keep it in the profile, also as the Dock does — and the tiles carry the Dock's notification
-  badges — WhatsApp's unread count, Mail's — which takes Accessibility access (see
-  [Permissions](./permissions.md)). While such a profile is active the macOS
+  tiles launch or bring an app forward, carry the running dot, and on right-click
+  offer Remove from Dock and the dock's settings first, then the Dock's own menu: the
+  app's open windows — across every instance, a check mark on the one in front, a
+  diamond on a minimized one; pick one and it comes forward — then Options (Keep in
+  Dock, Show in Finder), Show All Windows, Hide and Quit. The window list is read through Accessibility (see
+  [Permissions](./permissions.md)); without it the menu has an item that leads there.
+  Recent documents are the one thing the Dock's menu has and this one cannot: macOS
+  hands an app's list to that app alone. Hold a tile — an app or a widget — and drag
+  it off the dock to remove it, as in the Dock; widgets offer Remove from Dock on
+  right-click too. Optionally, apps that are open but not in the profile follow after
+  a divider, as the Dock does — hold one and drag it across the divider to keep it in
+  the profile, or choose Keep in Dock, also as the Dock does — and the tiles carry the
+  Dock's notification badges — WhatsApp's unread count, Mail's — which takes
+  Accessibility access too. While such a profile is active the macOS
   Dock is parked out of the way (⌘⌥D still toggles it); it comes back with the next
   profile that does not stand in for it, and when Dock Profiler quits.
 - **Widgets only** — a strip of widgets beside the macOS Dock, which keeps doing its
@@ -76,7 +82,7 @@ as you drop. Widgets keep their place next to the app they follow, so auto-save
 rearranging the app list underneath does not scatter them.
 
 Right-click anywhere on the dock for **Custom Dock Settings…**, which opens the profile
-on this tab. A widget's own settings — the folder a stack opens, the apps in a stack,
+on this tab; on a tile it is at the top of the menu, with Remove from Dock. A widget's own settings — the folder a stack opens, the apps in a stack,
 a layout, what an Accessories widget shows — are in its context menu too, so the dock
 can be set up without leaving it.
 

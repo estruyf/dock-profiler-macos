@@ -33,6 +33,10 @@ struct WelcomeView: View {
                 .padding(.horizontal, 34)
                 .padding(.top, 26)
 
+            loginItem
+                .padding(.horizontal, 34)
+                .padding(.top, 14)
+
             permissions
                 .padding(.horizontal, 34)
                 .padding(.top, 14)
@@ -59,7 +63,52 @@ struct WelcomeView: View {
         }
         .frame(width: 620)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { badges.refreshTrust() }
+        .onAppear {
+            badges.refreshTrust()
+            settings.refreshLoginItemStatus()
+        }
+    }
+
+    // MARK: - Login item
+
+    /// A menu bar app is only useful while it is running; this is the moment to
+    /// say so. The toggle is the same one as in Settings.
+    private var loginItem: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "power")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Open at login")
+                    .font(.system(size: 15, weight: .medium))
+                Text("Dock Profiler lives in the menu bar. Start it with your Mac and your profiles, shortcut and custom dock are there from the first minute. You can change this in Settings.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let error = settings.loginItemError {
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.orange)
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 12)
+            Toggle("Open at login", isOn: $settings.launchAtLogin)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .padding(.top, 2)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08))
+        )
     }
 
     // MARK: - Permissions
@@ -76,7 +125,7 @@ struct WelcomeView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Accessibility — optional")
                     .font(.system(size: 15, weight: .medium))
-                Text("Lets a custom dock show the Dock's notification badges — WhatsApp's unread count, Mail's — on its app tiles. Nothing else is read.")
+                Text("Lets a custom dock show the Dock's notification badges — WhatsApp's unread count, Mail's — on its app tiles, and list an app's open windows when you right-click its tile. Nothing else is read.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

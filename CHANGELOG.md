@@ -5,6 +5,31 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-21
+
+### Added
+
+- **Three ways to draw the Agents widget.** **Each agent** — a card per session,
+  as before; **One tile** — a single tile with a count in the colour of the most
+  urgent session and a word on what they are doing, that opens into the list;
+  or **Minimal** — the icon and the count alone, a tile the size of an app icon.
+  Pick one on its card in the editor or in its context menu. Profiles that had
+  the old "one tile" toggle on come across as One tile.
+- **New Window in the tile's menu.** Right-click a running app on the custom
+  dock and, under its windows, its own New Window command is there — New
+  Finder Window, VS Code's New Window, Mail's New Viewer Window, whatever the
+  app's File menu calls it — as the Dock's menu has for apps that offer one.
+  Found in the app's menu bar through Accessibility, the permission the window
+  list already uses, so it appears for any app with such an item and not for
+  one without.
+- **Browser profiles in the tile's menu.** Right-click Chrome, Edge, Brave,
+  Vivaldi, Chromium, Firefox or Zen on the custom dock and a **Profiles**
+  submenu lists the browser's profiles as its own menu does — the account's
+  picture or the profile's initial on its colour, in the profile picker's
+  order, a check mark on those with a window open — and choosing one opens a
+  new window as that profile. Read from the files the browsers keep, so there
+  is nothing to set up.
+
 ## [1.7.0] - 2026-09-20
 
 ### Added

@@ -701,8 +701,15 @@ private struct WidgetSettingsCard: View {
         case .appStack:
             appList
         case .agents:
-            Toggle("One tile that opens into the sessions", isOn: $tile.stacked)
-                .controlSize(.small)
+            Picker("Layout", selection: $tile.agentsLayout) {
+                ForEach(AgentsLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: 220)
         case .accessories:
             accessorySettings
         case .nowPlaying:

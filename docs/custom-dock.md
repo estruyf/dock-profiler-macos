@@ -20,8 +20,11 @@ goes away, edit the active profile and it updates as you go.
   tiles launch or bring an app forward, carry the running dot, and on right-click
   offer Remove from Dock and the dock's settings first, then the Dock's own menu: the
   app's open windows — across every instance, a check mark on the one in front, a
-  diamond on a minimized one; pick one and it comes forward — then Options (Keep in
-  Dock, Show in Finder), Show All Windows, Hide and Quit. The window list is read through Accessibility (see
+  diamond on a minimized one; pick one and it comes forward — then the app's own
+  **New Window** (New Finder Window, New Viewer Window — whatever its File menu calls
+  it) for a running app that has one, then, on a browser, its **Profiles** (see
+  below), then Options (Keep in Dock, Show in Finder), Show All Windows, Hide and
+  Quit. The window list and the New Window item are read through Accessibility (see
   [Permissions](./permissions.md)); without it the menu has an item that leads there.
   Recent documents are the one thing the Dock's menu has and this one cannot: macOS
   hands an app's list to that app alone. Hold a tile — an app or a widget — and drag
@@ -81,6 +84,19 @@ tile or widget for a moment, drag it along the dock and let go — the profile i
 as you drop. Widgets keep their place next to the app they follow, so auto-save
 rearranging the app list underneath does not scatter them.
 
+### Browser profiles
+
+Right-click a browser on the dock and its **Profiles** submenu lists the browser's
+profiles as its own menu does — the account's picture or the profile's initial on its
+colour, in the order of the browser's profile picker, a check mark on those with a
+window open — and choosing one opens a new window as that profile. Read from the
+files the browsers keep, so there is nothing to set up. Chrome (and its Beta, Dev and
+Canary builds), Microsoft Edge (and its channels), Brave, Vivaldi, Chromium, Firefox
+(and Developer Edition and Nightly) and Zen are covered. Firefox does not say which
+profiles are open, so its are never marked; and as Firefox's own profile manager, a
+profile it already has open answers with its "already running" notice rather than
+another window. Arc is left out: its profiles belong to its spaces, not to windows.
+
 Right-click anywhere on the dock for **Custom Dock Settings…**, which opens the profile
 on this tab; on a tile it is at the top of the menu, with Remove from Dock. A widget's own settings — the folder a stack opens, the apps in a stack,
 a layout, what an Accessories widget shows — are in its context menu too, so the dock
@@ -112,8 +128,8 @@ can be set up without leaving it.
   Dock stack. Downloads by default; choose any folder on its card in the editor.
 - **App Stack** — several apps folded into one tile, a grid of their icons, that opens
   into the apps. Add apps on its card or drop them from Finder.
-- **Agents** — see below. It can also fold into one tile with a count that opens into
-  the list.
+- **Agents** — see below. A card per session, one tile with a count that opens into
+  the list, or just the icon and the count.
 - **AI Usage** — what is left of your Claude and GitHub Copilot allowances, a card per
   service, as numbers, rings or bars. See below.
 
@@ -129,6 +145,12 @@ first. There is nothing extra to set up. Beyond four sessions the rest fold into
 
 Click a card to bring that session's editor forward — VS Code, Insiders or Cursor,
 whichever is hosting it.
+
+On its card in the editor, or in its context menu, choose how the widget is drawn:
+**Each agent** for a card per session; **One tile** for a single tile with a count in
+the colour of the most urgent session and a word on what they are doing, that opens
+into the list; or **Minimal** for the icon and the count alone, a tile the size of an
+app icon. With one session, the tile opens it straight away.
 
 ### AI Usage
 

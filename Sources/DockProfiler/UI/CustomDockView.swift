@@ -155,7 +155,10 @@ private struct WidgetSettingsMenu: View {
                 }
             }
         case .agents:
-            Toggle("One Tile That Opens Into the Sessions", isOn: binding(\.stacked))
+            Picker("Layout", selection: binding(\.agentsLayout)) {
+                ForEach(AgentsLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
         case .nowPlaying:
             Toggle("Show Previous and Next Buttons", isOn: binding(\.showsControls))
         case .aiUsage:
@@ -810,12 +813,14 @@ private struct AppTileView: View {
         tile.open()
     }
 
-    /// The Dock's menu for an app tile, near enough: its open windows, then
-    /// Options, then Show All Windows, Hide and Quit; for one that is not
-    /// running, Options and Open — after Remove from Dock and the dock's settings,
-    /// which come first. Recent documents are the one thing missing — macOS hands
-    /// an app's list to that app alone. Built afresh on every right-click, so the
-    /// windows are the ones open now.
+    /// The Dock's menu for an app tile, near enough: its open windows, then its
+    /// New Window and a browser's profiles, then Options, then Show All Windows,
+    /// Hide and Quit;
+    /// for one that is not running, the profiles, Options and Open — after
+    /// Remove from Dock and the dock's settings, which come first. Recent
+    /// documents are the one thing missing — macOS hands an app's list to that
+    /// app alone. Built afresh on every right-click, so the windows and profiles
+    /// are the ones there now.
     private func buildMenu() -> NSMenu {
         DockTooltipController.shared.cancel()
         let menu = NSMenu()
@@ -830,6 +835,10 @@ private struct AppTileView: View {
             } ?? []
             if let app = instances.first {
                 addWindows(of: instances, to: menu)
+                if let command = AppWindows.newWindow(of: app) {
+                    menu.addItem(command.title) { command.perform() }
+                }
+                if let profiles { menu.addItem(profiles) }
                 menu.addItem(options)
                 menu.addItem(.separator())
                 menu.addItem("Show All Windows") { AppWindows.showAll(of: app) }
@@ -838,6 +847,7 @@ private struct AppTileView: View {
                 }
                 menu.addItem("Quit") { for instance in instances { instance.terminate() } }
             } else {
+                if let profiles { menu.addItem(profiles) }
                 menu.addItem(options)
                 menu.addItem(.separator())
                 menu.addItem("Open") { open() }
@@ -878,6 +888,25 @@ private struct AppTileView: View {
             }
         }
         if !windows.isEmpty { menu.addItem(.separator()) }
+    }
+
+    /// A browser's profiles, as its own Dock menu lists them: the account's
+    /// picture or initial, a check mark on the ones with a window up, and
+    /// choosing one opens a new window as that profile. Nil for any other app,
+    /// and for a browser with no profiles to show.
+    private var profiles: NSMenuItem? {
+        guard let identifier = tile.bundleIdentifier, let url, BrowserProfiles.isBrowser(identifier) else { return nil }
+        let profiles = BrowserProfiles.profiles(of: identifier)
+        guard !profiles.isEmpty else { return nil }
+        let submenu = NSMenu(title: "Profiles")
+        for profile in profiles {
+            let item = submenu.addItem(profile.name) { BrowserProfiles.open(profile, of: identifier, at: url) }
+            item.image = profile.image
+            item.state = profile.isOpen ? .on : .off
+        }
+        let item = NSMenuItem(title: "Profiles", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     /// The Dock's Options submenu: Keep in Dock for a running app that is not in
@@ -1186,8 +1215,9 @@ private struct BatteryWidget: View {
 // MARK: - Agents
 
 /// The coding agents Agent Frame is tracking: a card per session, each a button
-/// that brings the editor window hosting it forward. Beyond a few, the rest fold
-/// into a menu so the dock does not run away.
+/// that brings the editor window hosting it forward — beyond a few, the rest fold
+/// into a menu so the dock does not run away — or, folded into one tile, a count
+/// that opens into the list, with or without the words.
 private struct AgentsWidget: View {
     let tile: WidgetTile
 
@@ -1200,16 +1230,21 @@ private struct AgentsWidget: View {
     var body: some View {
         let layout = vertical ? AnyLayout(VStackLayout(spacing: 6)) : AnyLayout(HStackLayout(spacing: 8))
         layout {
-            if tile.stacked {
+            switch tile.agentsLayout {
+            case .one:
                 AgentsStackTile(tile: tile)
-            } else if monitor.sessions.isEmpty {
-                SessionChip(session: nil)
-            } else {
-                ForEach(monitor.sessions.prefix(shown)) { session in
-                    SessionChip(session: session)
-                }
-                if monitor.sessions.count > shown {
-                    overflow
+            case .minimal:
+                AgentsStackTile(tile: tile, minimal: true)
+            case .each:
+                if monitor.sessions.isEmpty {
+                    SessionChip(session: nil)
+                } else {
+                    ForEach(monitor.sessions.prefix(shown)) { session in
+                        SessionChip(session: session)
+                    }
+                    if monitor.sessions.count > shown {
+                        overflow
+                    }
                 }
             }
         }

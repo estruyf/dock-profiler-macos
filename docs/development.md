@@ -72,6 +72,8 @@ Sources/DockProfiler/
   Services/NowPlayingMonitor.swift    Music and Spotify, for the now-playing widget
   Services/TrashMonitor.swift         ~/.Trash, for the trash widget
   Services/AIUsageMonitor.swift       Claude and Copilot allowances, for the AI usage widget
+  Services/AppWindows.swift           Another app's windows and New Window, through Accessibility, for the tile menus
+  Services/BrowserProfiles.swift      Chrome's and Firefox's profiles, for the browsers' tile menus
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/DockBadgeMonitor.swift     The Dock's badges through Accessibility, for the tiles

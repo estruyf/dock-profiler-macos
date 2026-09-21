@@ -229,9 +229,12 @@ struct AppStackWidget: View {
 // MARK: - Agents, stacked
 
 /// The agents widget folded into one tile: a count in the colour of the most urgent
-/// session, opening into the list. `AgentsWidget` keeps the monitor running.
+/// session, opening into the list. Minimal drops the words and keeps the icon and
+/// the count on a square tile, whichever way the dock runs. `AgentsWidget` keeps
+/// the monitor running.
 struct AgentsStackTile: View {
     let tile: WidgetTile
+    var minimal: Bool = false
 
     @Environment(\.self) private var environment
     @Environment(\.dockVertical) private var vertical
@@ -241,12 +244,15 @@ struct AgentsStackTile: View {
     /// Sessions come most urgent first.
     private var urgent: AgentState? { monitor.sessions.first?.state }
 
+    /// The icon stands alone on a square tile: in a column, and when minimal.
+    private var compact: Bool { vertical || minimal }
+
     var body: some View {
-        CardButton(action: open) {
-            let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
+        CardButton(action: open, square: minimal ? true : nil) {
+            let layout = compact ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
             layout {
                 BotGlyph()
-                    .frame(width: environment.scaled(vertical ? 20 : 24), height: environment.scaled(vertical ? 20 : 24))
+                    .frame(width: environment.scaled(compact ? 20 : 24), height: environment.scaled(compact ? 20 : 24))
                     .foregroundStyle(monitor.sessions.isEmpty ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
                     .overlay(alignment: .topTrailing) {
                         if !monitor.sessions.isEmpty {
@@ -254,7 +260,7 @@ struct AgentsStackTile: View {
                                 .offset(x: environment.scaled(8), y: -environment.scaled(6))
                         }
                     }
-                if !vertical {
+                if !compact {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Agents")
                             .font(.system(size: environment.scaled(13), weight: .semibold))

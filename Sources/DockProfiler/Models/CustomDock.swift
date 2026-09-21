@@ -129,6 +129,34 @@ enum UsageLayout: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the Agents widget draws the sessions Agent Frame is tracking.
+enum AgentsLayout: String, Codable, CaseIterable, Identifiable {
+    /// A card per session: folder and state on a chip, or a tile in a column.
+    case each
+    /// One tile with a count in the colour of the most urgent session, that opens into the list.
+    case one
+    /// The icon and the count alone, a tile the size of an app icon.
+    case minimal
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .each: return "Each agent"
+        case .one: return "One tile"
+        case .minimal: return "Minimal"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .each: return "A card per session"
+        case .one: return "One tile that opens into the sessions"
+        case .minimal: return "The icon and a count"
+        }
+    }
+}
+
 /// How the Accessories widget draws each battery: a tile the size of an app icon
 /// with the device's icon inside a ring that empties with it.
 enum AccessoryLayout: String, Codable, CaseIterable, Identifiable {
@@ -176,8 +204,8 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     var path: String?
     /// App stack: the apps folded into it.
     var apps: [DockTile] = []
-    /// Agents: one tile with a count that opens into the list, rather than a chip per session.
-    var stacked: Bool = false
+    /// Agents: a card per session, one tile with a count that opens into the list, or the icon and count alone.
+    var agentsLayout: AgentsLayout = .each
     /// Accessories: how each battery is drawn, which accessories are left out, and
     /// whether this Mac's own battery sits among them. Accessories are shown unless
     /// hidden, so a new one appears as soon as it connects.
@@ -214,7 +242,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         case .appStack:
             return apps.isEmpty ? "No apps yet" : apps.map(\.label).joined(separator: ", ")
         case .agents:
-            return stacked ? "One tile that opens into the sessions" : kind.summary
+            return agentsLayout == .each ? kind.summary : agentsLayout.summary
         case .accessories:
             var shown = hiddenAccessoryIDs.isEmpty ? "Every accessory" : "Every accessory but \(hiddenAccessoryIDs.count)"
             if showsMacBattery { shown += " and this Mac" }
@@ -233,8 +261,14 @@ struct WidgetTile: Codable, Identifiable, Hashable {
 
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, anchor, path, apps, stacked, showsControls, usageLayout, usageServices
+        case id, kind, anchor, path, apps, agentsLayout, showsControls, usageLayout, usageServices
         case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
+    }
+
+    /// Keys earlier versions wrote and this one only reads.
+    private enum LegacyKeys: String, CodingKey {
+        /// Agents, before there were three layouts: true for one tile, false for a card per session.
+        case stacked
     }
 
     init(from decoder: Decoder) throws {
@@ -244,7 +278,13 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         anchor = try container.decodeIfPresent(WidgetAnchor.self, forKey: .anchor) ?? .end
         path = try container.decodeIfPresent(String.self, forKey: .path)
         apps = try container.decodeIfPresent([DockTile].self, forKey: .apps) ?? []
-        stacked = try container.decodeIfPresent(Bool.self, forKey: .stacked) ?? false
+        // A layout this build does not know — from a newer one — falls back to the
+        // default rather than making the whole file unreadable. Before there were
+        // three, `stacked` chose between the first two.
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        let stacked = try legacy.decodeIfPresent(Bool.self, forKey: .stacked) ?? false
+        agentsLayout = (try? container.decodeIfPresent(String.self, forKey: .agentsLayout))
+            .flatMap(AgentsLayout.init(rawValue:)) ?? (stacked ? .one : .each)
         showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls) ?? false
         usageLayout = try container.decodeIfPresent(UsageLayout.self, forKey: .usageLayout) ?? .rings
         usageServices = try container.decodeIfPresent([UsageService].self, forKey: .usageServices) ?? UsageService.allCases

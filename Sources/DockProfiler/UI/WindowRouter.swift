@@ -12,5 +12,8 @@ final class WindowRouter: ObservableObject {
     /// Set for a profile so its editor opens on the Custom Dock tab — from a
     /// right-click on the dock itself.
     @Published var pendingCustomDock: UUID?
+    /// With `pendingCustomDock`: the Widgets tab rather than the dock's own — from
+    /// a right-click on a widget.
+    @Published var pendingWidgets = false
     private init() {}
 }

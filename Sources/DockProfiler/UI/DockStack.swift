@@ -18,6 +18,14 @@ struct DockStackItem: Identifiable {
     /// Ticked in a list; underlined with a running dot in a grid.
     var isCurrent = false
     var action: () -> Void
+    /// The item's context menu; none without any.
+    var menu: [DockStackMenuEntry] = []
+}
+
+/// One line of an item's context menu in a stack.
+enum DockStackMenuEntry {
+    case item(String, destructive: Bool = false, action: () -> Void)
+    case separator
 }
 
 /// How a stack lays its items out: files and apps as a grid of icons, sessions and
@@ -35,6 +43,11 @@ struct DockStackContent {
     var emptyText: String
     /// An action under the items, like the Dock's "Open in Finder".
     var footer: DockStackItem?
+    /// For a stack whose order is its own to set: the items can be held and
+    /// dragged along the grid, and letting go hands back the ids in their new order.
+    var onReorder: (([String]) -> Void)?
+    /// With `onReorder`: an item carried off the panel and let go leaves the stack.
+    var onMoveOut: ((String) -> Void)?
 }
 
 /// A click on the stack should act at once, without the panel needing to be key.
@@ -73,9 +86,6 @@ final class DockStackController {
         makePanelIfNeeded()
         guard let panel, let hosting else { return }
         openID = id
-        hosting.rootView = DockStackView(content: content, dismiss: { [weak self] in self?.dismiss() })
-        hosting.layoutSubtreeIfNeeded()
-        let size = hosting.fittingSize
 
         // Centred on the pointer along the dock, and just off the dock's far side —
         // the slab itself when the pointer is in the dock's panel, otherwise whichever
@@ -85,6 +95,11 @@ final class DockStackController {
         let window = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0))
         let dock = window.flatMap { CustomDockWindowController.shared.slabFrame(in: $0) ?? $0.frame }
         panel.appearance = window.flatMap { CustomDockWindowController.shared.forcedAppearance(in: $0) }
+        // Drawn as the dock's own slab is, so the stack belongs to it.
+        let slab = window.flatMap { CustomDockWindowController.shared.slabLook(in: $0) }
+        hosting.rootView = DockStackView(content: content, look: slab?.look ?? DockLook(), tint: slab?.tint, dismiss: { [weak self] in self?.dismiss() })
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
         let gap: CGFloat = 5
         let reach: CGFloat = 48
         var origin: NSPoint
@@ -153,7 +168,7 @@ final class DockStackController {
     private func makePanelIfNeeded() {
         guard panel == nil else { return }
         let placeholder = DockStackContent(title: "", items: [], style: .list, emptyText: "")
-        let hosting = StackHostingView(rootView: DockStackView(content: placeholder, dismiss: {}))
+        let hosting = StackHostingView(rootView: DockStackView(content: placeholder, look: DockLook(), tint: nil, dismiss: {}))
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -180,12 +195,30 @@ final class DockStackController {
 /// optional action underneath. Sized to its content, up to a few rows, then scrolls.
 struct DockStackView: View {
     let content: DockStackContent
+    /// The dock's slab, so the stack is drawn as the dock is.
+    let look: DockLook
+    let tint: Color?
     let dismiss: () -> Void
 
+    @Environment(\.colorScheme) private var systemColorScheme
+
     private let gridColumns = 5
-    private let cell = CGSize(width: 84, height: 86)
+    private let cell = CGSize(width: 84, height: 90)
     private let rowHeight: CGFloat = 40
     private let maxHeight: CGFloat = 360
+
+    /// A held item, carried along the grid — or off the panel, to leave the stack.
+    @State private var dragging: String?
+    @State private var dragPoint: CGPoint = .zero
+    @State private var pendingOrder: [DockStackItem]?
+    @State private var frames: [String: CGRect] = [:]
+    @State private var gridSize: CGSize = .zero
+    /// The grid's frame in the hosting view, to place mouse events from `dragMonitor`.
+    @State private var gridInHost: CGRect = .zero
+    @State private var dragMonitor: Any?
+    @State private var out = false
+
+    private var items: [DockStackItem] { pendingOrder ?? content.items }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -232,15 +265,9 @@ struct DockStackView: View {
         }
         .foregroundStyle(DockPalette.onSlab)
         .frame(width: width)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(DockPalette.slab)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(DockPalette.rim, lineWidth: 1)
-                )
-        )
+        .background(DockSlab(look: look, tint: tint, cornerRadius: 14))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
     }
 
     private var columns: Int { min(gridColumns, max(1, content.items.count)) }
@@ -272,31 +299,191 @@ struct DockStackView: View {
 
     private var grid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(cell.width), spacing: 0), count: columns), spacing: 0) {
-            ForEach(content.items) { item in
-                Button {
-                    dismiss()
-                    item.action()
-                } label: {
-                    VStack(spacing: 4) {
-                        icon(item.icon, size: 44)
-                        Text(item.title)
-                            .font(.system(size: 11))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                            .frame(height: 28, alignment: .top)
-                        Circle()
-                            .fill(DockPalette.onSlab.opacity(item.isCurrent ? 0.85 : 0))
-                            .frame(width: 4, height: 4)
-                    }
-                    .padding(.top, 6)
-                    .frame(width: cell.width, height: cell.height)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(HighlightButtonStyle(cornerRadius: 10))
-                .help(item.subtitle ?? item.title)
+            ForEach(items) { item in
+                gridCell(item)
+                    .background(StackCellFrameReporter(id: item.id))
+                    // While held, the slot stays in the grid — invisible, shuffling
+                    // with the others — and the item is drawn as the ghost.
+                    .opacity(dragging == item.id ? 0 : 1)
+                    .allowsHitTesting(dragging != item.id)
+                    .simultaneousGesture(dragGesture(item), including: content.onReorder == nil ? .subviews : .all)
             }
         }
         .padding(8)
+        .coordinateSpace(name: "stack")
+        .onPreferenceChange(StackCellFrameKey.self) { frames = $0 }
+        .background(GeometryReader { geometry in
+            Color.clear
+                .onAppear { gridSize = geometry.size; gridInHost = geometry.frame(in: .global) }
+                .onChange(of: geometry.size) { _, size in gridSize = size; gridInHost = geometry.frame(in: .global) }
+        })
+        .overlay(ghost)
+    }
+
+    private func gridCell(_ item: DockStackItem) -> some View {
+        Button {
+            dismiss()
+            item.action()
+        } label: {
+            VStack(spacing: 0) {
+                icon(item.icon, size: 44)
+                // The running dot sits right under the icon, as under a dock tile.
+                Circle()
+                    .fill(DockPalette.onSlab.opacity(item.isCurrent ? 0.85 : 0))
+                    .frame(width: 4, height: 4)
+                    .frame(height: 8)
+                Text(item.title)
+                    .font(.system(size: 11))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(height: 28, alignment: .top)
+            }
+            .padding(.top, 6)
+            .frame(width: cell.width, height: cell.height)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(HighlightButtonStyle(cornerRadius: 10))
+        .help(item.subtitle ?? item.title)
+        .contextMenu { menu(for: item) }
+    }
+
+    @ViewBuilder
+    private func menu(for item: DockStackItem) -> some View {
+        ForEach(Array(item.menu.enumerated()), id: \.offset) { _, entry in
+            switch entry {
+            case .item(let title, let destructive, let action):
+                Button(title, role: destructive ? .destructive : nil) {
+                    dismiss()
+                    action()
+                }
+            case .separator:
+                Divider()
+            }
+        }
+    }
+
+    // MARK: - Dragging
+
+    /// The held item, lifted and following the pointer — kept within the panel,
+    /// with a word on what letting go does once the pointer has left it.
+    @ViewBuilder
+    private var ghost: some View {
+        if dragging != nil, let item = items.first(where: { $0.id == dragging }) {
+            let x = min(max(dragPoint.x, cell.width / 2), max(cell.width / 2, gridSize.width - cell.width / 2))
+            let y = min(max(dragPoint.y, cell.height / 2), max(cell.height / 2, gridSize.height - cell.height / 2))
+            VStack(spacing: 0) {
+                icon(item.icon, size: 44)
+                Color.clear.frame(height: 8)
+                Text(item.title)
+                    .font(.system(size: 11))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .frame(height: 28, alignment: .top)
+            }
+            .padding(.top, 6)
+            .frame(width: cell.width, height: cell.height)
+            .scaleEffect(out ? 0.9 : 1.08)
+            .opacity(out ? 0.55 : 1)
+            .overlay {
+                if out {
+                    Text("Out of stack")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(.black.opacity(0.75)))
+                        .fixedSize()
+                }
+            }
+            .shadow(color: .black.opacity(0.3), radius: 6, y: 2)
+            .animation(.easeOut(duration: 0.12), value: out)
+            .position(x: x, y: y)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Hold an item for a moment, then move it — the dock's own gesture.
+    private func dragGesture(_ item: DockStackItem) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .named("stack")))
+            .onChanged { value in
+                guard case .second(true, let drag) = value else { return }
+                if dragging != item.id { beginDrag(item) }
+                guard let drag else { return }
+                dragMoved(to: drag.location)
+            }
+            .onEnded { _ in endDrag() }
+    }
+
+    private func beginDrag(_ item: DockStackItem) {
+        dragging = item.id
+        pendingOrder = content.items
+        out = false
+        dragPoint = frames[item.id].map { CGPoint(x: $0.midX, y: $0.midY) } ?? .zero
+        installDragMonitor()
+    }
+
+    /// The pointer has moved to `point`, in the grid's space. Off the panel by a
+    /// margin, the drag becomes a move out; over the grid, the others shuffle aside.
+    private func dragMoved(to point: CGPoint) {
+        guard let id = dragging, let held = items.first(where: { $0.id == id }) else { return }
+        dragPoint = point
+        let margin: CGFloat = 24
+        out = content.onMoveOut != nil
+            && (point.x < -margin || point.y < -margin || point.x > gridSize.width + margin || point.y > gridSize.height + margin)
+        var order = items.filter { $0.id != id }
+        if !out {
+            // The cell the pointer is in, reading order: rows first, then along the row.
+            let target = order.filter { other in
+                guard let frame = frames[other.id] else { return false }
+                if abs(frame.midY - point.y) <= cell.height / 2 { return frame.midX < point.x }
+                return frame.midY < point.y
+            }.count
+            order.insert(held, at: target)
+        }
+        guard order.map(\.id) != items.map(\.id) else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { pendingOrder = order }
+    }
+
+    /// AppKit keeps sending the drag to the window the mouse went down in, wherever
+    /// the pointer goes; SwiftUI's gesture only reports it inside the window. Once a
+    /// drag has begun the events are read directly, in the hosting view's (flipped)
+    /// space, and placed against the grid's frame in it.
+    private func installDragMonitor() {
+        removeDragMonitor()
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { event in
+            MainActor.assumeIsolated {
+                guard let host = event.window?.contentView else { return }
+                let inHost = host.convert(event.locationInWindow, from: nil)
+                let point = CGPoint(x: inHost.x - gridInHost.minX, y: inHost.y - gridInHost.minY)
+                dragMoved(to: point)
+                if event.type == .leftMouseUp { endDrag() }
+            }
+            return event
+        }
+    }
+
+    private func removeDragMonitor() {
+        if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+        dragMonitor = nil
+    }
+
+    private func endDrag() {
+        guard let id = dragging else { return }
+        dragging = nil
+        removeDragMonitor()
+        if out {
+            out = false
+            pendingOrder = nil
+            dismiss()
+            content.onMoveOut?(id)
+            return
+        }
+        if let order = pendingOrder, order.map(\.id) != content.items.map(\.id) {
+            content.onReorder?(order.map(\.id))
+        } else {
+            pendingOrder = nil
+        }
     }
 
     private var list: some View {
@@ -367,6 +554,23 @@ struct DockStackView: View {
     private func symbolName(for icon: DockStackItem.Icon) -> String? {
         if case .symbol(let name, _) = icon { return name }
         return nil
+    }
+}
+
+private struct StackCellFrameReporter: View {
+    let id: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(key: StackCellFrameKey.self, value: [id: geometry.frame(in: .named("stack"))])
+        }
+    }
+}
+
+private struct StackCellFrameKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { $1 }
     }
 }
 

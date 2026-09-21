@@ -9,9 +9,11 @@ of the way of the real Dock. (Why it is built that way is in
 
 ![The custom dock: apps, then clock, date, battery, Trash and a Downloads stack](./screenshots/custom-dock.png)
 
-Turn it on in the profile editor's **Custom Dock** tab. The dock follows the active
-profile: activate one with a custom dock and it appears, activate one without and it
-goes away, edit the active profile and it updates as you go.
+Turn it on in the profile editor's **Custom Dock** tab, which holds the dock itself —
+where it sits, how it looks. Its widgets have a tab of their own, **Widgets**, next to
+it. The dock follows the active profile: activate one with a custom dock and it
+appears, activate one without and it goes away, edit the active profile and it updates
+as you go.
 
 ## Two forms
 
@@ -97,12 +99,37 @@ profiles are open, so its are never marked; and as Firefox's own profile manager
 profile it already has open answers with its "already running" notice rather than
 another window. Arc is left out: its profiles belong to its spaces, not to windows.
 
+Menus open where the Dock opens them: off the dock's edge, on the far side of the
+tile and centred on it, a small tail pointing at the tile, rather than under the
+pointer.
+
 Right-click anywhere on the dock for **Custom Dock Settings…**, which opens the profile
-on this tab; on a tile it is at the top of the menu, with Remove from Dock. A widget's own settings — the folder a stack opens, the apps in a stack,
-a layout, what an Accessories widget shows — are in its context menu too, so the dock
+on the Custom Dock tab; on an app tile it is at the top of the menu, with Remove from
+Dock. On a widget the item is **Widget Settings…**, which opens the Widgets tab
+instead. A widget's own settings — the folder a stack opens, the apps in a stack, a
+layout, what an Accessories widget shows — are in its context menu too, so the dock
 can be set up without leaving it.
 
+### Into a stack, by dragging
+
+Hold an app tile or a launcher, carry it over the middle of an **App Stack** and the
+stack swells to take it; let go and it is folded in — out of the row, into the stack.
+The same works in the editor's preview.
+
+In the stack's own panel, hold an item and drag it to reorder the stack, or carry it
+off the panel and let go to take it out: an app goes back into the app row beside the
+stack, a launcher becomes a tile of its own there. Right-click an item for **Open**,
+**Show in Finder**, **Make a Launcher** (for an app), **Move Out of Stack** and
+**Remove from Stack**.
+
 ## Widgets
+
+The **Widgets** tab lists the profile's widgets, a card each, folded to a line — its
+name and what it is set to — that opens on a click when the widget has settings.
+**Add widget** is at the top of the list, and again under it once the list is long.
+Drag a card by its header to reorder the list (where the dock is widgets alone; among
+apps the order is the Items tab's), or drop a launcher's card on an App Stack's to fold
+it in.
 
 - **Clock**, **Date**, **Battery** — the glanceable ones.
 - **Accessories** — the batteries of your AirPods and their case, Magic Keyboard, mouse
@@ -126,8 +153,12 @@ can be set up without leaving it.
   something to the phone is one drag. Click it for Finder's AirDrop window.
 - **Folder** — a folder that opens into its most recent files, newest first, like a
   Dock stack. Downloads by default; choose any folder on its card in the editor.
-- **App Stack** — several apps folded into one tile, a grid of their icons, that opens
-  into the apps. Add apps on its card or drop them from Finder.
+- **App Stack** — several apps and launchers folded into one tile, a grid of their
+  icons, that opens into them. Add apps on its card or drop them from Finder; add a
+  launcher there, or move one in from its own card.
+- **Launcher** — an app opened with arguments of your own: Chrome as your work
+  profile, VS Code on a project, a browser in incognito. Drawn as an app tile, with
+  the running dot, and an icon of its own if you give it one. See below.
 - **Agents** — see below. A card per session, one tile with a count that opens into
   the list, or just the icon and the count.
 - **AI Usage** — what is left of your Claude and GitHub Copilot allowances, a card per
@@ -135,6 +166,52 @@ can be set up without leaving it.
 
 Stacks open in a panel beside the dock, on the side away from its edge, that goes away
 on a click anywhere else — and, like the dock, never takes focus from the front app.
+
+### Launcher
+
+A **Launcher** is an app tile that opens the app the way you say: a fresh copy of it
+with arguments on the command line — what `open -na App --args …` does. Add one from
+the widget menu and set it up on its card in the editor:
+
+- **App** — choose it, or drop it from Finder onto the card.
+- **Profile** — for a browser the dock knows (the ones listed under
+  [Browser profiles](#browser-profiles)), its profiles as its own picker lists them.
+  Choosing one fills in the browser's switch for you — `--profile-directory=…` for
+  Chrome and the Chromium family, `-P …` for Firefox and Zen, with `-no-remote` added
+  while a Firefox is already running, as the Profiles menu does — and the profile's
+  picture is badged on the app's icon, so two Chromes are told apart at a glance.
+- **Arguments** — anything else, written as it would be typed after the app on a
+  command line: `--incognito https://example.com`, `~/Projects/site --new-window`.
+  Quote an argument with spaces; `~/` is your home folder.
+- **Name** — what the tooltip and the card call it; the app's name until you type one.
+- **Icon** — any image, or another app to borrow the icon of: choose one, or drop it
+  on the icon at the left of the card. **Use App's Icon** puts the app's own back.
+- **Badge** — a letter or two of your own on the icon's corner, in the profile's
+  colour, in place of its picture or initial — for two profiles whose names start
+  alike. Blank keeps the profile's own.
+
+On the dock a launcher looks and behaves like an app tile: click to open, the running
+dot underneath, Open and Show in Finder on right-click, along with the app, the
+profile and the icon to change in place. A launcher with no profile and no arguments
+is just an app tile with its own icon: it brings a running app forward rather than
+opening a second copy. With arguments there has to be a new process, since a running
+app is never handed them; apps that keep to one instance — the browsers, VS Code —
+take it over and answer with a window, and others open a second copy.
+
+Only the custom dock can do this: the macOS Dock launches apps as they are, so a
+launcher lives among the widgets, in a combined dock or a widgets-only strip.
+
+Launchers go into an **App Stack** too, beside plain apps: drag a launcher's card onto
+the stack's card, or its tile onto the stack on the dock; or right-click the card and
+choose **Move into Stack**; or on the stack's card click **Add Launcher**; or
+right-click an app in the stack for **Make a Launcher**. Click an entry in the
+stack's row and what can be done with it appears underneath: a launcher's settings,
+and for either **Move Out of Stack** and **Remove from Stack** — an app has **Make a
+Launcher** too. The same is on right-click. Drag the icons along the row to reorder
+the stack; drag one off the row and let go to take it out. Out of the stack an entry
+becomes a tile of its own next to the stack — a launcher as it is, an app as a
+launcher of it, which opens the app just as an app tile does. In the stack's panel a
+launcher shows its own icon and badge, with the profile and arguments under its name.
 
 ### Agents
 

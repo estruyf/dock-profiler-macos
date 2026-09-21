@@ -161,24 +161,34 @@ struct AppStackWidget: View {
 
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockEdge) private var edge
+    @Environment(\.dockStackTargeted) private var targeted
+    @Environment(\.dockWidgetUpdate) private var update
+    @Environment(\.dockStackMoveOut) private var moveOut
     @ObservedObject private var running = RunningAppsMonitor.shared
 
     var body: some View {
         IconTile(action: open) {
             RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
-                .fill(DockPalette.onSlab.opacity(0.12))
+                .fill(DockPalette.onSlab.opacity(targeted ? 0.3 : 0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
+                        .strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0)
+                )
                 .overlay(preview.padding(size * 0.1))
+                // A held tile over it: the stack opens up to take it.
+                .scaleEffect(targeted ? 1.15 : 1)
+                .animation(.easeOut(duration: 0.15), value: targeted)
         }
         .dockTooltip(
-            tile.apps.isEmpty ? "App Stack" : "\(tile.apps.count) app\(tile.apps.count == 1 ? "" : "s")",
-            tile.apps.isEmpty ? "Add apps in the profile editor" : tile.apps.prefix(4).map(\.label).joined(separator: ", ")
+            tile.stack.isEmpty ? "App Stack" : "\(tile.stack.count) app\(tile.stack.count == 1 ? "" : "s")",
+            tile.stack.isEmpty ? "Add apps in the profile editor" : tile.stack.prefix(4).map(\.title).joined(separator: ", ")
         )
     }
 
     /// Up to four icons in a two-by-two grid; fewer sit centred.
     @ViewBuilder
     private var preview: some View {
-        let shown = Array(tile.apps.prefix(4))
+        let shown = Array(tile.stack.prefix(4))
         if shown.isEmpty {
             Image(systemName: "square.stack.3d.up")
                 .font(.system(size: size * 0.36))
@@ -186,9 +196,9 @@ struct AppStackWidget: View {
         } else {
             let columns = shown.count == 1 ? 1 : 2
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columns), spacing: 2) {
-                ForEach(shown) { app in
+                ForEach(shown) { entry in
                     Group {
-                        if let icon = app.icon {
+                        if let icon = entry.icon(side: size / 2) {
                             Image(nsImage: icon).resizable()
                         } else {
                             Image(systemName: "app.dashed")
@@ -203,26 +213,205 @@ struct AppStackWidget: View {
 
     private func open() {
         DockTooltipController.shared.cancel()
-        let items = tile.apps.map { app in
+        let items = tile.stack.map { entry in
             DockStackItem(
-                id: app.id.uuidString,
-                title: app.label,
-                subtitle: app.subtitle,
-                icon: app.icon.map { .image($0) } ?? .symbol("app.dashed", DockPalette.onSlab),
-                isCurrent: running.isRunning(app),
-                action: { app.open() }
+                id: entry.id.uuidString,
+                title: entry.title,
+                subtitle: entry.subtitle,
+                icon: entry.icon(side: 64).map { .image($0) } ?? .symbol("app.dashed", DockPalette.onSlab),
+                isCurrent: entry.bundleIdentifier.map { running.bundleIdentifiers.contains($0) } ?? false,
+                action: { entry.open() },
+                menu: menu(for: entry)
             )
         }
+        // On the live dock the stack's order and contents are its own to change;
+        // in the editor's preview they are set on the card.
+        let editable = update != nil
         DockStackController.shared.toggle(
             for: tile.id,
             content: DockStackContent(
-                title: tile.apps.isEmpty ? "App Stack" : "\(tile.apps.count) apps",
+                title: tile.stack.isEmpty ? "App Stack" : "\(tile.stack.count) apps",
                 items: items,
                 style: .grid,
-                emptyText: "Add apps to this stack in the profile editor"
+                emptyText: "Add apps to this stack in the profile editor",
+                onReorder: editable ? { ids in
+                    edit { stack in stack.stack = ids.compactMap { id in stack.stack.first { $0.id.uuidString == id } } }
+                } : nil,
+                onMoveOut: editable && moveOut != nil ? { id in
+                    if let entry = tile.stack.first(where: { $0.id.uuidString == id }) { moveOut?(entry, tile.id) }
+                } : nil
             ),
             edge: edge
         )
+    }
+
+    /// The entry's own menu: open it, show it in Finder, make a launcher of an app,
+    /// take it out of the stack, or drop it from the stack — the last three on the
+    /// live dock alone.
+    private func menu(for entry: AppStackEntry) -> [DockStackMenuEntry] {
+        var menu: [DockStackMenuEntry] = [.item("Open") { entry.open() }]
+        if let path = entry.path, !entry.isMissing {
+            menu.append(.item("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) })
+        }
+        guard update != nil else { return menu }
+        menu.append(.separator)
+        if entry.app != nil {
+            menu.append(.item("Make a Launcher") { edit { $0.makeLauncher(of: entry.id) } })
+        }
+        if let moveOut {
+            menu.append(.item("Move Out of Stack") { moveOut(entry, tile.id) })
+        }
+        menu.append(.separator)
+        menu.append(.item("Remove from Stack", destructive: true) { edit { $0.stack.removeAll { $0.id == entry.id } } })
+        return menu
+    }
+
+    private func edit(_ change: (inout WidgetTile) -> Void) {
+        var changed = tile
+        change(&changed)
+        update?(changed)
+    }
+}
+
+extension AppStackEntry {
+    /// The app's icon, or the launcher's as its tile draws it; nil when the app has gone.
+    func icon(side: CGFloat) -> NSImage? {
+        switch self {
+        case .app(let app): return app.icon
+        case .launcher(let launcher): return Launcher.icon(of: launcher, side: side)
+        }
+    }
+
+    /// The app's path, or what the launcher opens it with.
+    var subtitle: String? {
+        switch self {
+        case .app(let app): return app.subtitle
+        case .launcher(let launcher): return launcher.launchSummary
+        }
+    }
+
+    var bundleIdentifier: String? {
+        switch self {
+        case .app(let app): return app.bundleIdentifier
+        case .launcher(let launcher): return launcher.appURL.flatMap { Bundle(url: $0)?.bundleIdentifier }
+        }
+    }
+
+    var isMissing: Bool {
+        switch self {
+        case .app(let app): return app.isMissing
+        case .launcher(let launcher): return launcher.path.map { !FileManager.default.fileExists(atPath: $0) } ?? false
+        }
+    }
+
+    func open() {
+        switch self {
+        case .app(let app): app.open()
+        case .launcher(let launcher): Launcher.open(launcher)
+        }
+    }
+}
+
+extension WidgetTile {
+    /// Launcher: the profile and the arguments in a line, for a tooltip or a
+    /// stack's subtitle; nil with neither.
+    var launchSummary: String? {
+        var parts: [String] = []
+        if let profile = browserProfile { parts.append("As \(profile.name)") }
+        let arguments = arguments.trimmingCharacters(in: .whitespaces)
+        if !arguments.isEmpty { parts.append(arguments) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Launcher
+
+/// An app opened with arguments of its own — a browser as one of its profiles, an
+/// editor on a folder — drawn as an app tile: its icon with the running dot under
+/// it, and the profile's picture badged on the corner so two tiles of the same
+/// browser are told apart. An icon of its own replaces the app's altogether.
+struct LauncherWidget: View {
+    let tile: WidgetTile
+
+    @Environment(\.dockTileSize) private var size
+    @Environment(\.dockVertical) private var vertical
+    @ObservedObject private var running = RunningAppsMonitor.shared
+    @State private var hovering = false
+
+    private var bundleIdentifier: String? { tile.appURL.flatMap { Bundle(url: $0)?.bundleIdentifier } }
+    private var isRunning: Bool { bundleIdentifier.map { running.bundleIdentifiers.contains($0) } ?? false }
+    private var isMissing: Bool { tile.path.map { !FileManager.default.fileExists(atPath: $0) } ?? false }
+
+    var body: some View {
+        let dotRoom: CGFloat = 8
+        let layout = vertical ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+        Button(action: open) {
+            layout {
+                icon
+                    .frame(width: size - dotRoom, height: size - dotRoom)
+                    .scaleEffect(hovering ? 1.08 : 1)
+                    .animation(.easeOut(duration: 0.12), value: hovering)
+                Circle()
+                    .fill(DockPalette.onSlab.opacity(isRunning ? 0.85 : 0))
+                    .frame(width: 4, height: 4)
+                    .frame(width: vertical ? dotRoom : nil, height: vertical ? nil : dotRoom)
+            }
+            .frame(width: vertical ? size : nil, height: vertical ? nil : size)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .dockTooltip(tile.title, subtitle)
+        .dockContextMenu {
+            if let url = tile.appURL, !isMissing {
+                Button("Open") { open() }
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if let custom = Launcher.customIcon(of: tile) {
+            Image(nsImage: custom).resizable().aspectRatio(contentMode: .fit)
+        } else if let app = Launcher.appIcon(of: tile) {
+            Image(nsImage: app).resizable()
+                .overlay(alignment: .bottomTrailing) { profileBadge }
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
+                .fill(DockPalette.onSlab.opacity(0.12))
+                .overlay(
+                    Image(systemName: tile.path == nil ? "arrow.up.forward.app" : "questionmark")
+                        .font(.system(size: size * 0.36))
+                        .foregroundStyle(DockPalette.onSlab.opacity(0.7))
+                )
+        }
+    }
+
+    /// The profile's picture on the icon's corner, ringed in the slab's colour so
+    /// it stands off the icon, the way a Dock badge does.
+    @ViewBuilder
+    private var profileBadge: some View {
+        let side = (size - 8) * 0.42
+        if let image = Launcher.badgeImage(of: tile, side: side) {
+            Image(nsImage: image)
+                .resizable()
+                .frame(width: side, height: side)
+                .clipShape(Circle())
+                .overlay(Circle().strokeBorder(DockPalette.slab, lineWidth: max(1.5, side * 0.08)))
+                .offset(x: side * 0.12, y: side * 0.12)
+        }
+    }
+
+    private var subtitle: String? {
+        guard tile.path != nil else { return "Choose an app in the profile editor" }
+        if isMissing { return "Moved or deleted" }
+        return tile.launchSummary
+    }
+
+    private func open() {
+        DockTooltipController.shared.cancel()
+        Launcher.open(tile)
     }
 }
 

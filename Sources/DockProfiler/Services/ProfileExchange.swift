@@ -115,13 +115,7 @@ extension DockProfile {
         profile.apps = apps.map { $0.portable() }
         profile.others = others.map { $0.portable() }
         profile.desktop.wallpaperPath = desktop.wallpaperPath.map(ProfileExchange.portablePath)
-        profile.customDock.widgets = customDock.widgets.map { widget in
-            var widget = widget
-            widget.path = widget.path.map(ProfileExchange.portablePath)
-            widget.apps = widget.apps.map { $0.portable() }
-            widget.anchor = widget.anchor.mapped(ProfileExchange.portablePath)
-            return widget
-        }
+        profile.customDock.widgets = customDock.widgets.map { $0.portable() }
         // Positions keyed by display id are kept: a profile shared between your own
         // Macs on the same displays wants them, and anyone else's displays ignore them.
         return profile
@@ -146,17 +140,7 @@ extension DockProfile {
             return local
         }
         profile.others = others.map { $0.localized() }
-        profile.customDock.widgets = customDock.widgets.map { widget in
-            var widget = widget
-            widget.id = UUID()
-            widget.path = widget.path.map(ProfileExchange.localPath)
-            widget.apps = widget.apps.map { $0.localized() }
-            widget.anchor = widget.anchor.mapped { path in
-                let local = ProfileExchange.localPath(path)
-                return moved[local] ?? local
-            }
-            return widget
-        }
+        profile.customDock.widgets = customDock.widgets.map { $0.localized(moved: moved) }
 
         if let path = desktop.wallpaperPath.map(ProfileExchange.localPath) {
             profile.desktop.wallpaperPath = path
@@ -315,5 +299,43 @@ enum ProfileSharing {
         }
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+    }
+}
+
+extension WidgetTile {
+    /// The widget with every path relative to the home folder — the launchers in
+    /// a stack included.
+    func portable() -> WidgetTile {
+        var widget = self
+        widget.path = path.map(ProfileExchange.portablePath)
+        widget.iconPath = iconPath.map(ProfileExchange.portablePath)
+        widget.stack = stack.map { entry in
+            switch entry {
+            case .app(let app): return .app(app.portable())
+            case .launcher(let launcher): return .launcher(launcher.portable())
+            }
+        }
+        widget.anchor = anchor.mapped(ProfileExchange.portablePath)
+        return widget
+    }
+
+    /// The widget with its paths expanded and a fresh id; `moved` maps the paths
+    /// of apps found elsewhere on this Mac, for the anchor to follow.
+    func localized(moved: [String: String]) -> WidgetTile {
+        var widget = self
+        widget.id = UUID()
+        widget.path = path.map(ProfileExchange.localPath)
+        widget.iconPath = iconPath.map(ProfileExchange.localPath)
+        widget.stack = stack.map { entry in
+            switch entry {
+            case .app(let app): return .app(app.localized())
+            case .launcher(let launcher): return .launcher(launcher.localized(moved: moved))
+            }
+        }
+        widget.anchor = anchor.mapped { path in
+            let local = ProfileExchange.localPath(path)
+            return moved[local] ?? local
+        }
+        return widget
     }
 }

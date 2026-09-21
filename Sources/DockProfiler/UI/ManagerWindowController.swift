@@ -61,7 +61,8 @@ final class ManagerWindowController: NSObject, NSWindowDelegate {
 
     /// The custom dock's settings are the Custom Dock tab of the profile that
     /// shows it, so a right-click on the dock opens the editor there.
-    func showCustomDock(of id: UUID) {
+    func showCustomDock(of id: UUID, widgets: Bool = false) {
+        WindowRouter.shared.pendingWidgets = widgets
         WindowRouter.shared.pendingCustomDock = id
         show(selecting: id)
     }

@@ -95,7 +95,8 @@ magnification, auto-hide and a Liquid Glass look on macOS Tahoe.
 Widgets: **Clock**, **Date**, **Battery**, **Accessories** (AirPods, keyboard, mouse
 and trackpad batteries), **Now Playing** (Music and Spotify),
 **Profiles**, **Trash**, **AirDrop**, **Folder** (a stack of its newest files),
-**App Stack**, **Agents** (your running Claude Code sessions, via
+**App Stack**, **Launcher** (an app opened with arguments of your own — a browser as
+one of its profiles — under an icon of your own), **Agents** (your running Claude Code sessions, via
 [Agent Frame](https://github.com/estruyf/vscode-agent-frame)), and **AI Usage** (how
 much of your Claude and GitHub Copilot allowance is left).
 

@@ -38,6 +38,7 @@ private struct DockPanelContent: View {
     let placement: DockPlacement
     let magnificationExtra: CGFloat
     var openSettings: (() -> Void)? = nil
+    var openWidgets: (() -> Void)? = nil
 
     var body: some View {
         let extra = magnificationExtra
@@ -67,7 +68,9 @@ private struct DockPanelContent: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(insets)
             .environment(\.dockSettingsAction, openSettings)
+            .environment(\.dockWidgetsAction, openWidgets)
             .environment(\.dockWidgetUpdate, CustomDockWindowController.update)
+            .environment(\.dockStackMoveOut, CustomDockWindowController.moveOut)
     }
 }
 
@@ -143,6 +146,13 @@ final class CustomDockWindowController {
     /// the dock follows the system, or the window is not a dock.
     func forcedAppearance(in window: NSWindow) -> NSAppearance? {
         dock(for: window)?.forcedAppearance
+    }
+
+    /// The slab's look and tint when `window` is one of the dock's panels, for a
+    /// tip or a stack opened off it to be drawn the same way. Nil for any other
+    /// window, such as the editor showing a preview.
+    func slabLook(in window: NSWindow) -> (look: DockLook, tint: Color)? {
+        dock(for: window)?.slabLook
     }
 
     /// Where the slab itself sits on screen when `window` is one of the dock's
@@ -286,9 +296,50 @@ final class CustomDockWindowController {
         store.update(profile)
     }
 
-    /// A right-click on the dock: the Custom Dock tab of the profile showing it.
+    /// An entry taken out of a stack, to stand beside it: an app back into the app
+    /// row of a combined dock, right after the stack; otherwise — a launcher, or an
+    /// app where there is no app row — a launcher tile after the stack, with the
+    /// stack's anchor so a combined dock puts it there too.
+    fileprivate static func moveOut(_ entry: AppStackEntry, from stackID: UUID) {
+        let store = ProfileStore.shared
+        guard var profile = store.activeProfile,
+              let index = profile.customDock.widgets.firstIndex(where: { $0.id == stackID }) else { return }
+        let stack = profile.customDock.widgets[index]
+        profile.customDock.widgets[index].stack.removeAll { $0.id == entry.id }
+        switch entry {
+        case .app(let app) where profile.customDock.isCombined:
+            // The stack sits right after its anchor app; the app goes after that,
+            // so it lands beside the stack.
+            let at: Int
+            switch stack.anchor {
+            case .start: at = 0
+            case .end: at = profile.apps.count
+            case .after(let path), .afterSpacers(let path?, _):
+                at = profile.apps.firstIndex { $0.path == path }.map { $0 + 1 } ?? profile.apps.count
+            case .afterSpacers(nil, _): at = 0
+            }
+            profile.apps.insert(app, at: at)
+        case .app(let app):
+            guard let path = app.path else { break }
+            var launcher = WidgetTile(kind: .launcher)
+            launcher.path = path
+            launcher.anchor = stack.anchor
+            profile.customDock.widgets.insert(launcher, at: index + 1)
+        case .launcher(var launcher):
+            launcher.anchor = stack.anchor
+            profile.customDock.widgets.insert(launcher, at: index + 1)
+        }
+        store.update(profile)
+    }
+
+    /// A right-click on the dock: the Custom Dock tab of the profile showing it —
+    /// or, from a widget, the Widgets tab.
     fileprivate static func openSettings(of profileID: UUID) {
         ManagerWindowController.shared.showCustomDock(of: profileID)
+    }
+
+    fileprivate static func openWidgets(of profileID: UUID) {
+        ManagerWindowController.shared.showCustomDock(of: profileID, widgets: true)
     }
 
     // MARK: - Levels
@@ -358,6 +409,8 @@ private final class DockScreenPanel {
     private var placement = DockPlacement()
     private var options: CustomDockOptions { content.options }
     private var edge: DockStripEdge { placement.edge }
+    /// The slab's look and the profile's colour, for what opens off the dock.
+    var slabLook: (look: DockLook, tint: Color) { (options.look, content.color.color) }
 
     let panel: NSPanel
     private let hosting: DockHostingView
@@ -449,7 +502,8 @@ private final class DockScreenPanel {
             ),
             placement: placement,
             magnificationExtra: options.magnificationExtra,
-            openSettings: content.profileID.map { id in { CustomDockWindowController.openSettings(of: id) } }
+            openSettings: content.profileID.map { id in { CustomDockWindowController.openSettings(of: id) } },
+            openWidgets: content.profileID.map { id in { CustomDockWindowController.openWidgets(of: id) } }
         )
 
         if options.autohide {

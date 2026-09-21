@@ -97,6 +97,36 @@ extension EnvironmentValues {
         get { self[DockWidgetUpdateKey.self] }
         set { self[DockWidgetUpdateKey.self] = newValue }
     }
+
+    /// Opens the Widgets tab of the profile's editor; nil in the editor's preview.
+    var dockWidgetsAction: (() -> Void)? {
+        get { self[DockWidgetsActionKey.self] }
+        set { self[DockWidgetsActionKey.self] = newValue }
+    }
+
+    /// Takes an entry out of the stack with the id, to stand on its own beside it.
+    var dockStackMoveOut: ((AppStackEntry, UUID) -> Void)? {
+        get { self[DockStackMoveOutKey.self] }
+        set { self[DockStackMoveOutKey.self] = newValue }
+    }
+
+    /// A held tile is over this stack: letting go folds it in.
+    var dockStackTargeted: Bool {
+        get { self[DockStackTargetedKey.self] }
+        set { self[DockStackTargetedKey.self] = newValue }
+    }
+}
+
+private struct DockStackTargetedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct DockWidgetsActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
+private struct DockStackMoveOutKey: EnvironmentKey {
+    static let defaultValue: ((AppStackEntry, UUID) -> Void)? = nil
 }
 
 // MARK: - Context menus
@@ -111,16 +141,33 @@ private struct DockContextMenu<Items: View>: ViewModifier {
     let items: Items
 
     @Environment(\.dockSettingsAction) private var openSettings
+    @Environment(\.dockWidgetsAction) private var openWidgets
     @Environment(\.dockRemoveAction) private var remove
     @Environment(\.dockWidget) private var widget
     @Environment(\.dockWidgetUpdate) private var update
+    @Environment(\.dockEdge) private var edge
 
     private var hasSettings: Bool { widget?.kind.isConfigurable == true && update != nil }
 
     func body(content: Content) -> some View {
-        content.contextMenu {
+        if #available(macOS 14.4, *) {
+            content.overlay(DockMenuAnchor(edge: edge) {
+                DockTooltipController.shared.cancel()
+                return NSHostingMenu(rootView: menu)
+            })
+        } else {
+            // Before `NSHostingMenu`, SwiftUI's own menu, which opens at the pointer.
+            content.contextMenu { menu }
+        }
+    }
+
+    /// The items as SwiftUI has them; `NSHostingMenu` turns them into the menu.
+    private var menu: some View {
+        Group {
             if let remove { Button("Remove from Dock", action: remove) }
-            if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
+            // A widget's menu leads to the Widgets tab, where its card is.
+            if let openWidgets { Button("Widget Settings…", action: openWidgets) }
+            else if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
             if remove != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
             items
             if hasSettings, Items.self != EmptyView.self { Divider() }
@@ -147,12 +194,33 @@ private struct WidgetSettingsMenu: View {
             Button("Choose Folder…", action: chooseFolder)
         case .appStack:
             Button("Add Apps…", action: chooseApps)
-            if !tile.apps.isEmpty {
+            if !tile.stack.isEmpty {
                 Menu("Remove App") {
-                    ForEach(tile.apps) { app in
-                        Button(app.label) { edit { $0.apps.removeAll { $0.id == app.id } } }
+                    ForEach(tile.stack) { entry in
+                        Button(entry.title) { edit { $0.stack.removeAll { $0.id == entry.id } } }
                     }
                 }
+            }
+        case .launcher:
+            // The name and the arguments are typed on the card in the editor.
+            Button(tile.path == nil ? "Choose App…" : "Change App…", action: chooseApp)
+            if let identifier = tile.appURL.flatMap({ Bundle(url: $0)?.bundleIdentifier }),
+               BrowserProfiles.isBrowser(identifier) {
+                let profiles = BrowserProfiles.profiles(of: identifier)
+                if !profiles.isEmpty {
+                    Picker("Profile", selection: browserProfile(among: profiles)) {
+                        Text("None").tag(String?.none)
+                        ForEach(profiles) { profile in
+                            Label { Text(profile.name) } icon: { profile.image.map { Image(nsImage: $0) } }
+                                .tag(String?.some(profile.id))
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("Choose Icon…", action: chooseIcon)
+            if tile.iconPath != nil {
+                Button("Use App's Icon") { edit { $0.iconPath = nil } }
             }
         case .agents:
             Picker("Layout", selection: binding(\.agentsLayout)) {
@@ -258,9 +326,61 @@ private struct WidgetSettingsMenu: View {
         edit { tile in
             for url in panel.urls where url.pathExtension == "app" {
                 guard !tile.apps.contains(where: { $0.path == url.path }), let app = DockTile.app(at: url) else { continue }
-                tile.apps.append(app)
+                tile.stack.append(.app(app))
             }
         }
+    }
+
+    private func chooseApp() {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let url = LauncherPanels.chooseApp(near: tile.path) else { return }
+        edit { $0.setApp(at: url) }
+    }
+
+    private func chooseIcon() {
+        NSApp.activate(ignoringOtherApps: true)
+        guard let url = LauncherPanels.chooseIcon() else { return }
+        edit { $0.iconPath = url.path }
+    }
+
+    /// The chosen profile by id — with its name kept beside it for the tile.
+    private func browserProfile(among profiles: [BrowserProfile]) -> Binding<String?> {
+        Binding(
+            get: { tile.browserProfile?.id },
+            set: { id in
+                edit { $0.browserProfile = profiles.first { $0.id == id }.map { BrowserProfileRef(id: $0.id, name: $0.name) } }
+            }
+        )
+    }
+}
+
+/// The open panels a launcher is set up with, shared by its card in the editor
+/// and its menu on the dock.
+enum LauncherPanels {
+    /// An app, starting from the one already chosen.
+    @MainActor
+    static func chooseApp(near path: String?) -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = path.map { URL(fileURLWithPath: $0).deletingLastPathComponent() } ?? URL(fileURLWithPath: "/Applications")
+        panel.prompt = "Choose"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
+
+    /// An image file, or an app whose icon to borrow.
+    @MainActor
+    static func chooseIcon() -> URL? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image, .application]
+        panel.prompt = "Choose"
+        panel.message = "Choose an image, or an app to borrow the icon of"
+        return panel.runModal() == .OK ? panel.url : nil
     }
 }
 
@@ -317,6 +437,9 @@ struct CustomDockView: View {
     @State private var heldSlot: CGRect = .zero
     /// The held item is off the dock: letting go now removes it, as in the Dock.
     @State private var removing = false
+    /// The held item — an app or a launcher — is over the middle of a stack:
+    /// letting go folds it into the stack.
+    @State private var dropTarget: UUID?
     /// The dock's frame in the hosting view, to place mouse events from `dragMonitor`.
     @State private var frameInHost: CGRect = .zero
     /// Follows the mouse once a drag has begun. The gesture alone stops at the
@@ -365,9 +488,11 @@ struct CustomDockView: View {
             }
         }
         .padding(padding)
+        // Between the tiles and the plate: behind the tiles' own menus, in front
+        // of the material, which would otherwise take the click.
+        .modifier(SlabContextMenu())
         .background(plate)
         .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .modifier(SlabContextMenu())
         .overlay(ghost)
         // A forced light or dark style colours the tiles and cards too, not just the
         // slab. The panel sets the same appearance on its window; this covers the
@@ -395,35 +520,11 @@ struct CustomDockView: View {
         .environment(\.dockEdge, edge)
     }
 
-    /// The slab behind the tiles: blurred, glass or solid, with the profile's colour
-    /// washed over it if asked, and a hairline rim — except on glass, which draws its
-    /// own edge. Nothing at all when the look is transparent.
+    /// The slab behind the tiles — nothing at all when the look is transparent.
     @ViewBuilder
     private var plate: some View {
         if style.hasPlate {
-            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            let glass = DockMaterial.drawsGlass(style)
-            // Blur off means a solid slab — except for glass, which goes clear instead.
-            let solid = accessibility.reducesTransparency || (!look.translucent && !glass)
-            ZStack {
-                if solid {
-                    shape.fill(DockPalette.solid)
-                } else {
-                    // Glass and blur are different views; a new style makes a new one.
-                    DockMaterial(style: style, cornerRadius: cornerRadius, frosted: look.translucent)
-                        .id(style)
-                }
-                // Clear glass is the colour of whatever is behind it — white over a
-                // white window, where white tiles vanish. It needs a dimming layer, as
-                // Apple advises, so the tiles read over anything.
-                if glass, !solid, !look.translucent {
-                    shape.fill(DockPalette.glassDim)
-                }
-                if look.tinted, let tint {
-                    shape.fill(tint.opacity(0.28))
-                }
-                shape.strokeBorder(DockPalette.rim, lineWidth: glass && !solid ? 0 : 1)
-            }
+            DockSlab(look: look, tint: tint, cornerRadius: cornerRadius)
         }
     }
 
@@ -468,8 +569,8 @@ struct CustomDockView: View {
                     .scaleEffect(removing ? 0.9 : 1.08)
                     .opacity(removing ? 0.55 : 1)
                     .overlay {
-                        if removing {
-                            Text("Remove")
+                        if removing || dropTarget != nil {
+                            Text(removing ? "Remove" : "Add to Stack")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 7)
@@ -510,7 +611,42 @@ struct CustomDockView: View {
         let across = vertical ? point.x : point.y
         let slotAcross = vertical ? heldSlot.midX : heldSlot.midY
         removing = canRemove(item) && abs(across - slotAcross) > tileSize * 0.9
-        shuffle(item.id)
+        // Over the middle of a stack the row holds still — no shuffling past it —
+        // and the stack is the target. The middle rather than the whole tile, so
+        // the slot still moves to either side of a stack as it does past any tile.
+        dropTarget = removing ? nil : stackUnder(dragLocation, holding: item)
+        if dropTarget == nil { shuffle(item.id) }
+    }
+
+    /// The stack whose middle third the pointer is over, if the held item is one
+    /// a stack takes — an app tile, or a launcher.
+    private func stackUnder(_ along: CGFloat, holding item: DockStripItem) -> UUID? {
+        guard onReorder != nil, Self.stackEntry(for: item) != nil else { return nil }
+        return displayedItems.first { other in
+            guard other.id != item.id, other.widget?.kind == .appStack, let frame = frames[other.id] else { return false }
+            let centre = vertical ? frame.midY : frame.midX
+            let length = vertical ? frame.height : frame.width
+            return abs(along - centre) < length / 3
+        }?.id
+    }
+
+    /// What the item becomes in a stack; nil for one a stack does not take.
+    private static func stackEntry(for item: DockStripItem) -> AppStackEntry? {
+        switch item {
+        case .tile(let tile): return tile.kind == .app ? .app(tile) : nil
+        case .widget(let widget): return widget.kind == .launcher ? .launcher(widget) : nil
+        }
+    }
+
+    /// Folds the held item into the stack: out of the row, if it was in it, and
+    /// onto the end of the stack's entries.
+    private func drop(_ item: DockStripItem, into stackID: UUID) {
+        guard let entry = Self.stackEntry(for: item) else { return }
+        var row = items.filter { $0.id != item.id }
+        guard let index = row.firstIndex(where: { $0.id == stackID }), var stack = row[index].widget else { return }
+        stack.stack.append(entry)
+        row[index] = .widget(stack)
+        onReorder?(row)
     }
 
     /// AppKit keeps sending the drag to the window the mouse went down in, wherever
@@ -547,6 +683,7 @@ struct CustomDockView: View {
         heldItem = item
         heldSlot = frames[item.id] ?? .zero
         removing = false
+        dropTarget = nil
         dragLocation = centers[item.id] ?? 0
         // A running app lifts out of its section and takes a slot at the end of the
         // row, just before the divider, until it is carried past a pinned item.
@@ -589,13 +726,21 @@ struct CustomDockView: View {
             remove(dragging)
             return
         }
+        if let dropTarget, let item = heldItem {
+            self.dropTarget = nil
+            pendingOrder = nil
+            withAnimation(.easeInOut(duration: 0.15)) { drop(item, into: dropTarget) }
+            return
+        }
         if let order = pendingOrder, order.map(\.id) != items.map(\.id) {
             onReorder?(order)
             // The new items arrive through the profile; if for any reason they do
             // not, the dock goes back to what it was given.
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 800_000_000)
-                if dragging == nil { pendingOrder = nil }
+                // `dragging` here is the guard's copy; the state is what says
+                // whether another drag has begun since.
+                if self.dragging == nil { pendingOrder = nil }
             }
         } else {
             pendingOrder = nil
@@ -631,6 +776,7 @@ struct CustomDockView: View {
             }
         }
         .environment(\.dockRemoveAction, removable ? { remove(item.id) } : nil)
+        .environment(\.dockStackTargeted, dropTarget == item.id)
     }
 
     /// Puts a running app into the profile, at the end: Keep in Dock. The same
@@ -655,15 +801,18 @@ struct CustomDockView: View {
 }
 
 /// The slab's own context menu, for a right-click between the tiles: just the
-/// settings item, and only on the live dock.
+/// settings item, and only on the live dock. Behind the tiles, so theirs win.
 private struct SlabContextMenu: ViewModifier {
     @Environment(\.dockSettingsAction) private var openSettings
+    @Environment(\.dockEdge) private var edge
 
     func body(content: Content) -> some View {
         if let openSettings {
-            content.contextMenu {
-                Button("Custom Dock Settings…", action: openSettings)
-            }
+            content.background(DockMenuAnchor(edge: edge, atPointer: true) {
+                let menu = NSMenu()
+                menu.addItem("Custom Dock Settings…") { openSettings() }
+                return menu
+            })
         } else {
             content
         }
@@ -751,6 +900,7 @@ private struct AppTileView: View {
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockVertical) private var vertical
     @Environment(\.dockShowsBadges) private var showsBadges
+    @Environment(\.dockEdge) private var edge
     @Environment(\.dockPinAction) private var pin
     @Environment(\.dockRemoveAction) private var remove
     @Environment(\.dockSettingsAction) private var openSettings
@@ -779,7 +929,7 @@ private struct AppTileView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .dockTooltip(tile.label, tile.isMissing ? "Moved or deleted" : nil)
-        .overlay(AppTileMenu(build: buildMenu))
+        .overlay(DockMenuAnchor(edge: edge, build: buildMenu))
     }
 
     @ViewBuilder
@@ -923,19 +1073,30 @@ private struct AppTileView: View {
     }
 }
 
-/// An app tile's context menu, from AppKit rather than SwiftUI: SwiftUI builds a
-/// context menu's items once and keeps them, and the list of an app's windows
-/// has to be read again each time the menu opens, as the Dock does. AppKit asks
-/// `menu(for:)` on every right-click. Sits over the tile; a left click, a hover
-/// or a drag goes through to the tile underneath.
-private struct AppTileMenu: NSViewRepresentable {
+/// A tile's context menu, opened where the Dock opens its: off the dock's
+/// edge, on the far side of the tile and centred on it — or on the click, for
+/// the slab, as the Dock does for its divider — rather than under the pointer.
+/// From AppKit rather than SwiftUI, for two reasons: SwiftUI's context menu
+/// only opens at the pointer, and it builds its items once and keeps them,
+/// where an app's windows and a browser's profiles have to be read again each
+/// time the menu opens, as the Dock does. Sits over the tile; a left click, a
+/// hover or a drag goes through to the tile underneath.
+private struct DockMenuAnchor: NSViewRepresentable {
+    let edge: DockStripEdge
+    var atPointer: Bool = false
     let build: () -> NSMenu
 
     func makeNSView(context: Context) -> MenuView { MenuView() }
 
-    func updateNSView(_ view: MenuView, context: Context) { view.build = build }
+    func updateNSView(_ view: MenuView, context: Context) {
+        view.edge = edge
+        view.atPointer = atPointer
+        view.build = build
+    }
 
     final class MenuView: NSView {
+        var edge: DockStripEdge = .bottom
+        var atPointer = false
         var build: (() -> NSMenu)?
 
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -943,11 +1104,11 @@ private struct AppTileMenu: NSViewRepresentable {
             return super.hitTest(point)
         }
 
-        override func menu(for event: NSEvent) -> NSMenu? { build?() }
+        override func rightMouseDown(with event: NSEvent) { open(event) }
 
         // A control-click opens the menu as a right-click does.
         override func mouseDown(with event: NSEvent) {
-            if Self.opensMenu(event) { rightMouseDown(with: event) } else { super.mouseDown(with: event) }
+            if Self.opensMenu(event) { open(event) } else { super.mouseDown(with: event) }
         }
 
         private static func opensMenu(_ event: NSEvent) -> Bool {
@@ -956,6 +1117,109 @@ private struct AppTileMenu: NSViewRepresentable {
             case .leftMouseDown: return event.modifierFlags.contains(.control)
             default: return false
             }
+        }
+
+        /// Lays the menu's top-left corner where it sits clear of the tile on the
+        /// dock's far side, centred across the tile, with the tail between; AppKit
+        /// keeps the menu on screen from there. The view is not flipped: y runs up.
+        private func open(_ event: NSEvent) {
+            guard let menu = build?(), !menu.items.isEmpty, let window else { return }
+            let size = menu.size
+            let click = convert(event.locationInWindow, from: nil)
+            let centre = atPointer ? click : NSPoint(x: bounds.midX, y: bounds.midY)
+            let gap = MenuTail.tip + MenuTail.height
+            let across = MenuTail.width, along = MenuTail.height + MenuTail.overlap
+            let corner: NSPoint
+            let tail: NSRect
+            switch edge {
+            case .bottom:
+                corner = NSPoint(x: centre.x - size.width / 2, y: bounds.maxY + gap + size.height)
+                tail = NSRect(x: centre.x - across / 2, y: bounds.maxY + MenuTail.tip, width: across, height: along)
+            case .top:
+                corner = NSPoint(x: centre.x - size.width / 2, y: bounds.minY - gap)
+                tail = NSRect(x: centre.x - across / 2, y: bounds.minY - MenuTail.tip - along, width: across, height: along)
+            case .leading:
+                corner = NSPoint(x: bounds.maxX + gap, y: centre.y + size.height / 2)
+                tail = NSRect(x: bounds.maxX + MenuTail.tip, y: centre.y - across / 2, width: along, height: across)
+            case .trailing:
+                corner = NSPoint(x: bounds.minX - gap - size.width, y: centre.y + size.height / 2)
+                tail = NSRect(x: bounds.minX - MenuTail.tip - along, y: centre.y - across / 2, width: along, height: across)
+            }
+            let pointer = MenuTail(
+                frame: window.convertToScreen(convert(tail, to: nil)),
+                edge: edge,
+                appearance: effectiveAppearance
+            )
+            pointer.orderFront(nil)
+            menu.popUp(positioning: nil, at: corner, in: self)
+            pointer.close()
+        }
+    }
+}
+
+/// The Dock's menus end in a small tail pointing at the tile; AppKit's do not,
+/// so one is drawn in a window of its own — the menu's material, masked to a
+/// triangle — with its base a point under the menu's edge, so the two read as
+/// one shape, for as long as the menu is up. Takes no clicks and no focus.
+private final class MenuTail: NSPanel {
+    /// Across the base.
+    static let width: CGFloat = 14
+    /// Base to tip.
+    static let height: CGFloat = 7
+    /// Between the tip and the tile.
+    static let tip: CGFloat = 2
+    /// How far the base runs on under the menu.
+    static let overlap: CGFloat = 1
+
+    init(frame: NSRect, edge: DockStripEdge, appearance: NSAppearance?) {
+        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        level = .popUpMenu
+        ignoresMouseEvents = true
+        collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
+        self.appearance = appearance
+        let material = NSVisualEffectView(frame: NSRect(origin: .zero, size: frame.size))
+        material.material = .menu
+        material.blendingMode = .behindWindow
+        material.state = .active
+        material.maskImage = Self.mask(size: frame.size, edge: edge)
+        contentView = material
+    }
+
+    /// The tip points at the tile — down on a bottom dock — and the base sits on
+    /// the menu's side.
+    private static func mask(size: NSSize, edge: DockStripEdge) -> NSImage {
+        NSImage(size: size, flipped: false) { rect in
+            let base = MenuTail.overlap
+            let path = NSBezierPath()
+            switch edge {
+            case .bottom:
+                path.move(to: NSPoint(x: rect.minX, y: rect.maxY))
+                path.line(to: NSPoint(x: rect.midX, y: rect.minY))
+                path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+                path.appendRect(NSRect(x: rect.minX, y: rect.maxY - base, width: rect.width, height: base))
+            case .top:
+                path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+                path.line(to: NSPoint(x: rect.midX, y: rect.maxY))
+                path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+                path.appendRect(NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: base))
+            case .leading:
+                path.move(to: NSPoint(x: rect.maxX, y: rect.minY))
+                path.line(to: NSPoint(x: rect.minX, y: rect.midY))
+                path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+                path.appendRect(NSRect(x: rect.maxX - base, y: rect.minY, width: base, height: rect.height))
+            case .trailing:
+                path.move(to: NSPoint(x: rect.minX, y: rect.minY))
+                path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+                path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+                path.appendRect(NSRect(x: rect.minX, y: rect.minY, width: base, height: rect.height))
+            }
+            path.close()
+            NSColor.black.setFill()
+            path.fill()
+            return true
         }
     }
 }
@@ -1067,6 +1331,7 @@ struct WidgetTileView: View {
             case .accessories: AccessoriesWidget(tile: tile).dockContextMenu {}
             case .agents: AgentsWidget(tile: tile).dockContextMenu {}
             case .appStack: AppStackWidget(tile: tile).dockContextMenu {}
+            case .launcher: LauncherWidget(tile: tile)
             case .nowPlaying: NowPlayingWidget(tile: tile)
             case .profiles: ProfilesWidget(tile: tile)
             case .trash: TrashWidget(tile: tile)
@@ -1380,6 +1645,47 @@ struct StatusDot: View {
 }
 
 // MARK: - Material
+
+/// The slab behind the dock, and behind what opens off it — its tips and its
+/// stacks — so they all read as one: blurred, glass or solid, with the profile's
+/// colour washed over it if asked, and a hairline rim — except on glass, which
+/// draws its own edge. A transparent dock's tips and stacks take the system slab,
+/// since they need one of their own.
+struct DockSlab: View {
+    let look: DockLook
+    let tint: Color?
+    let cornerRadius: CGFloat
+
+    @ObservedObject private var accessibility = AccessibilityDisplay.shared
+
+    private var style: DockStyle { look.style.hasPlate ? look.style : .system }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let glass = DockMaterial.drawsGlass(style)
+        // Blur off means a solid slab — except for glass, which goes clear instead.
+        let solid = accessibility.reducesTransparency || (!look.translucent && !glass)
+        ZStack {
+            if solid {
+                shape.fill(DockPalette.solid)
+            } else {
+                // Glass and blur are different views; a new style makes a new one.
+                DockMaterial(style: style, cornerRadius: cornerRadius, frosted: look.translucent)
+                    .id(style)
+            }
+            // Clear glass is the colour of whatever is behind it — white over a
+            // white window, where white tiles vanish. It needs a dimming layer, as
+            // Apple advises, so the tiles read over anything.
+            if glass, !solid, !look.translucent {
+                shape.fill(DockPalette.glassDim)
+            }
+            if look.tinted, let tint {
+                shape.fill(tint.opacity(0.28))
+            }
+            shape.strokeBorder(DockPalette.rim, lineWidth: glass && !solid ? 0 : 1)
+        }
+    }
+}
 
 /// The blur behind the dock. A SwiftUI material would do inside a normal window,
 /// but in a clear, borderless panel the blur has to come from AppKit: a visual

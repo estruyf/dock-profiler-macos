@@ -11,6 +11,8 @@ struct BrowserProfile: Identifiable {
     let isOpen: Bool
     /// The account's picture, or the initial on the profile's colour, at menu size.
     let image: NSImage?
+    /// The profile's own colour, for a badge drawn in its place.
+    let color: NSColor
 }
 
 /// The profiles of the browsers on the dock, read from the files the browsers
@@ -54,14 +56,15 @@ enum BrowserProfiles {
         bundleIdentifier.map { families[$0] != nil } ?? false
     }
 
-    /// The browser's profiles in the order its picker shows them; empty when the
-    /// browser is not one that is known, or has not been run.
-    static func profiles(of bundleIdentifier: String) -> [BrowserProfile] {
+    /// The browser's profiles in the order its picker shows them, their pictures
+    /// `side` points across; empty when the browser is not one that is known, or
+    /// has not been run.
+    static func profiles(of bundleIdentifier: String, side: CGFloat = menuSide) -> [BrowserProfile] {
         switch families[bundleIdentifier] {
         case .chromium(let directory):
-            return chromiumProfiles(in: supportDirectory.appendingPathComponent(directory), running: isRunning(bundleIdentifier))
+            return chromiumProfiles(in: supportDirectory.appendingPathComponent(directory), running: isRunning(bundleIdentifier), side: side)
         case .firefox(let directory):
-            return firefoxProfiles(in: supportDirectory.appendingPathComponent(directory))
+            return firefoxProfiles(in: supportDirectory.appendingPathComponent(directory), side: side)
         case nil:
             return []
         }
@@ -80,17 +83,24 @@ enum BrowserProfiles {
     /// already running then gets Firefox's own "already running" notice, which
     /// is what its profile manager does too.
     static func open(_ profile: BrowserProfile, of bundleIdentifier: String, at url: URL) {
+        guard let arguments = arguments(opening: profile.id, of: bundleIdentifier) else { return }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
+        configuration.arguments = arguments
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    }
+
+    /// The browser's own switch for opening as the profile, for a fresh process
+    /// of it; nil for a browser that is not known.
+    static func arguments(opening profileID: String, of bundleIdentifier: String) -> [String]? {
         switch families[bundleIdentifier] {
         case .chromium:
-            configuration.arguments = ["--profile-directory=\(profile.id)"]
+            return ["--profile-directory=\(profileID)"]
         case .firefox:
-            configuration.arguments = ["-P", profile.id] + (isRunning(bundleIdentifier) ? ["-no-remote"] : [])
+            return ["-P", profileID] + (isRunning(bundleIdentifier) ? ["-no-remote"] : [])
         case nil:
-            return
+            return nil
         }
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
     // MARK: - Chromium
@@ -99,7 +109,7 @@ enum BrowserProfiles {
     /// directory, with the picker's order in `profiles_order` and the ones with
     /// windows up in `last_active_profiles` — which stays after the browser quits,
     /// for it to restore, so it only counts while the browser runs.
-    private static func chromiumProfiles(in directory: URL, running: Bool) -> [BrowserProfile] {
+    private static func chromiumProfiles(in directory: URL, running: Bool, side: CGFloat) -> [BrowserProfile] {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("Local State")),
               let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let profile = state["profile"] as? [String: Any],
@@ -111,11 +121,13 @@ enum BrowserProfiles {
             .sorted { chromiumName(cache[$0]!).localizedCaseInsensitiveCompare(chromiumName(cache[$1]!)) == .orderedAscending }
         return (order.filter { cache[$0] != nil } + rest).map { key in
             let info = cache[key]!
+            let color = (info["profile_highlight_color"] as? Int).map(skColor) ?? .systemGray
             return BrowserProfile(
                 id: key,
                 name: chromiumName(info),
                 isOpen: open.contains(key),
-                image: chromiumImage(for: info, in: directory.appendingPathComponent(key))
+                image: chromiumImage(for: info, in: directory.appendingPathComponent(key), color: color, side: side),
+                color: color
             )
         }
     }
@@ -131,14 +143,13 @@ enum BrowserProfiles {
 
     /// The account's picture where the browser saved it, else the profile's
     /// initial on its colour — the fallback the browsers draw themselves.
-    private static func chromiumImage(for info: [String: Any], in directory: URL) -> NSImage? {
+    private static func chromiumImage(for info: [String: Any], in directory: URL, color: NSColor, side: CGFloat) -> NSImage? {
         let names = [info["gaia_picture_file_name"] as? String, "Google Profile Picture.png", "Edge Profile Picture.png"]
         for name in names.compactMap({ $0 }) {
             let url = directory.appendingPathComponent(name)
-            if let image = cachedPicture(at: url) { return image }
+            if let image = cachedPicture(at: url, side: side) { return image }
         }
-        let color = (info["profile_highlight_color"] as? Int).map(skColor) ?? .systemGray
-        return monogram(String(chromiumName(info).prefix(1)).uppercased(), on: color)
+        return monogram(String(chromiumName(info).prefix(1)).uppercased(), on: color, side: side)
     }
 
     /// Chromium's SkColor: ARGB in a signed 32-bit integer.
@@ -156,7 +167,7 @@ enum BrowserProfiles {
 
     /// `profiles.ini` has a `[ProfileN]` section per profile with its `Name`.
     /// The order is the file's, which is the profile manager's.
-    private static func firefoxProfiles(in directory: URL) -> [BrowserProfile] {
+    private static func firefoxProfiles(in directory: URL, side: CGFloat) -> [BrowserProfile] {
         guard let text = try? String(contentsOf: directory.appendingPathComponent("profiles.ini"), encoding: .utf8) else {
             return []
         }
@@ -167,7 +178,8 @@ enum BrowserProfiles {
             if inProfile, let name, !name.isEmpty {
                 profiles.append(BrowserProfile(
                     id: name, name: name, isOpen: false,
-                    image: monogram(String(name.prefix(1)).uppercased(), on: .systemGray)
+                    image: monogram(String(name.prefix(1)).uppercased(), on: .systemGray, side: side),
+                    color: .systemGray
                 ))
             }
             name = nil
@@ -187,35 +199,38 @@ enum BrowserProfiles {
 
     // MARK: - Pictures
 
-    private static let side: CGFloat = 16
+    /// The size a menu item's image is drawn at.
+    static let menuSide: CGFloat = 16
 
-    /// Pictures are big — a megabyte each — so each is read once per version.
-    private static var pictures: [URL: (modified: Date, image: NSImage)] = [:]
+    /// Pictures are big — a megabyte each — so each is read once per version, at each size asked for.
+    private static var pictures: [String: (modified: Date, image: NSImage)] = [:]
 
-    private static func cachedPicture(at url: URL) -> NSImage? {
+    private static func cachedPicture(at url: URL, side: CGFloat) -> NSImage? {
         guard let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else {
             return nil
         }
-        if let cached = pictures[url], cached.modified == modified { return cached.image }
+        let key = "\(url.path)@\(side)"
+        if let cached = pictures[key], cached.modified == modified { return cached.image }
         guard let picture = NSImage(contentsOf: url) else { return nil }
         let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             NSBezierPath(ovalIn: rect).addClip()
             picture.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
             return true
         }
-        pictures[url] = (modified, image)
+        pictures[key] = (modified, image)
         return image
     }
 
-    /// A letter on a disc, as the browsers draw a profile without a picture.
-    private static func monogram(_ letter: String, on color: NSColor) -> NSImage {
+    /// A letter — or two, drawn smaller — on a disc, as the browsers draw a
+    /// profile without a picture.
+    static func monogram(_ letters: String, on color: NSColor, side: CGFloat) -> NSImage {
         NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
             color.setFill()
             NSBezierPath(ovalIn: rect).fill()
             // White on a dark colour, near-black on a light one.
             let luminance = color.usingColorSpace(.sRGB).map { 0.299 * $0.redComponent + 0.587 * $0.greenComponent + 0.114 * $0.blueComponent } ?? 0
-            let text = NSAttributedString(string: letter, attributes: [
-                .font: NSFont.systemFont(ofSize: side * 0.6, weight: .semibold),
+            let text = NSAttributedString(string: letters, attributes: [
+                .font: NSFont.systemFont(ofSize: side * (letters.count > 1 ? 0.42 : 0.6), weight: .semibold),
                 .foregroundColor: luminance > 0.6 ? NSColor.black.withAlphaComponent(0.75) : NSColor.white,
             ])
             let size = text.size()

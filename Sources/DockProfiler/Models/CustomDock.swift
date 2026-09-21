@@ -16,6 +16,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     case airDrop
     case folderStack
     case appStack
+    case launcher
     case aiUsage
 
     var id: String { rawValue }
@@ -33,6 +34,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .airDrop: return "AirDrop"
         case .folderStack: return "Folder"
         case .appStack: return "App Stack"
+        case .launcher: return "Launcher"
         case .aiUsage: return "AI Usage"
         }
     }
@@ -50,6 +52,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .airDrop: return "dot.radiowaves.up.forward"
         case .folderStack: return "folder"
         case .appStack: return "square.stack.3d.up"
+        case .launcher: return "arrow.up.forward.app"
         case .aiUsage: return "gauge.with.dots.needle.33percent"
         }
     }
@@ -67,6 +70,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .airDrop: return "Send files dropped on it to a nearby device"
         case .folderStack: return "A folder that opens into its files"
         case .appStack: return "Apps folded into one tile"
+        case .launcher: return "An app opened with arguments of your own, or a browser as one of its profiles"
         case .aiUsage: return "What is left of your Claude and Copilot allowances"
         }
     }
@@ -74,7 +78,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     /// Widgets that carry settings of their own, shown on their card in the editor.
     var isConfigurable: Bool {
         switch self {
-        case .folderStack, .appStack, .accessories, .agents, .nowPlaying, .aiUsage: return true
+        case .folderStack, .appStack, .launcher, .accessories, .agents, .nowPlaying, .aiUsage: return true
         default: return false
         }
     }
@@ -196,14 +200,71 @@ enum WidgetAnchor: Codable, Hashable {
     case afterSpacers(String?, Int)
 }
 
+/// A browser profile a launcher opens as: what the browser is told — Chromium's
+/// profile directory, Firefox's profile name — and the name it had when chosen,
+/// for the card and the tooltip without reading the browser's files again.
+struct BrowserProfileRef: Codable, Hashable {
+    var id: String
+    var name: String
+}
+
+/// One entry in an app stack: an app as it is, or a launcher — an app opened with
+/// arguments, under a name and an icon of its own — folded in with the rest.
+enum AppStackEntry: Codable, Hashable, Identifiable {
+    case app(DockTile)
+    case launcher(WidgetTile)
+
+    var id: UUID {
+        switch self {
+        case .app(let app): return app.id
+        case .launcher(let launcher): return launcher.id
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .app(let app): return app.label
+        case .launcher(let launcher): return launcher.title
+        }
+    }
+
+    var launcher: WidgetTile? {
+        if case .launcher(let launcher) = self { return launcher }
+        return nil
+    }
+
+    var app: DockTile? {
+        if case .app(let app) = self { return app }
+        return nil
+    }
+
+    /// The app's path, whichever the entry is.
+    var path: String? {
+        switch self {
+        case .app(let app): return app.path
+        case .launcher(let launcher): return launcher.path
+        }
+    }
+}
+
 struct WidgetTile: Codable, Identifiable, Hashable {
     var id: UUID = UUID()
     var kind: WidgetKind
     var anchor: WidgetAnchor = .end
     /// Folder stack: the folder it opens into.
     var path: String?
-    /// App stack: the apps folded into it.
-    var apps: [DockTile] = []
+    /// App stack: the apps and launchers folded into it, in order.
+    var stack: [AppStackEntry] = []
+    /// Launcher: the app at `path`, opened with these arguments — written as on a
+    /// command line — and, for a browser, as this profile; under a name and an
+    /// icon of its own when given them, else the app's.
+    var arguments: String = ""
+    var browserProfile: BrowserProfileRef?
+    var label: String?
+    var iconPath: String?
+    /// Launcher: a letter or two on the icon's corner, in place of the profile's
+    /// picture or initial — two profiles whose names start alike are told apart.
+    var badge: String?
     /// Agents: a card per session, one tile with a count that opens into the list, or the icon and count alone.
     var agentsLayout: AgentsLayout = .each
     /// Accessories: how each battery is drawn, which accessories are left out, and
@@ -226,12 +287,37 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         }
     }
 
-    /// What the tile is called in the dock and the editor: the folder's name, or the kind's.
+    /// What the tile is called in the dock and the editor: the folder's name, the
+    /// launcher's own name or its app's, or the kind's.
     var title: String {
         switch kind {
         case .folderStack: return path.map { ($0 as NSString).lastPathComponent } ?? kind.title
+        case .launcher:
+            if let label, !label.trimmingCharacters(in: .whitespaces).isEmpty { return label }
+            return appName ?? kind.title
         default: return kind.title
         }
+    }
+
+    /// Launcher: the app's name as Finder shows it, without the extension — which
+    /// Finder only drops for an app that is still there.
+    var appName: String? {
+        guard let path else { return nil }
+        let name = FileManager.default.displayName(atPath: path)
+        return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
+    }
+
+    /// Launcher: the app, or nil while none is chosen.
+    var appURL: URL? {
+        path.map { URL(fileURLWithPath: $0) }
+    }
+
+    /// Launcher: takes another app. A profile belonged to the old one, so it
+    /// goes; the name, the arguments and the icon were chosen on purpose and stay.
+    mutating func setApp(at url: URL) {
+        guard url.path != path else { return }
+        path = url.path
+        browserProfile = nil
     }
 
     /// The card's second line in the editor: the folder, the apps, or the kind's summary.
@@ -240,7 +326,14 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         case .folderStack:
             return path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? "No folder chosen"
         case .appStack:
-            return apps.isEmpty ? "No apps yet" : apps.map(\.label).joined(separator: ", ")
+            return stack.isEmpty ? "No apps yet" : stack.map(\.title).joined(separator: ", ")
+        case .launcher:
+            guard let appName else { return "No app chosen" }
+            var parts = [appName]
+            if let browserProfile { parts.append("as \(browserProfile.name)") }
+            let arguments = arguments.trimmingCharacters(in: .whitespaces)
+            if !arguments.isEmpty { parts.append(arguments) }
+            return parts.joined(separator: " · ")
         case .agents:
             return agentsLayout == .each ? kind.summary : agentsLayout.summary
         case .accessories:
@@ -259,10 +352,23 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         }
     }
 
+    /// App stack: the plain apps among the entries.
+    var apps: [DockTile] { stack.compactMap(\.app) }
+
+    /// App stack: makes a launcher of a plain app, in its place — the same app,
+    /// ready for arguments and an icon.
+    mutating func makeLauncher(of id: UUID) {
+        guard let index = stack.firstIndex(where: { $0.id == id }), let app = stack[index].app, let path = app.path else { return }
+        var launcher = WidgetTile(kind: .launcher)
+        launcher.path = path
+        stack[index] = .launcher(launcher)
+    }
+
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, anchor, path, apps, agentsLayout, showsControls, usageLayout, usageServices
+        case id, kind, anchor, path, apps, stack, agentsLayout, showsControls, usageLayout, usageServices
         case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
+        case arguments, browserProfile, label, iconPath, badge
     }
 
     /// Keys earlier versions wrote and this one only reads.
@@ -277,7 +383,14 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         kind = try container.decode(WidgetKind.self, forKey: .kind)
         anchor = try container.decodeIfPresent(WidgetAnchor.self, forKey: .anchor) ?? .end
         path = try container.decodeIfPresent(String.self, forKey: .path)
-        apps = try container.decodeIfPresent([DockTile].self, forKey: .apps) ?? []
+        // Before launchers could join, a stack was a list of apps alone.
+        stack = try container.decodeIfPresent([AppStackEntry].self, forKey: .stack)
+            ?? (try container.decodeIfPresent([DockTile].self, forKey: .apps) ?? []).map { .app($0) }
+        arguments = try container.decodeIfPresent(String.self, forKey: .arguments) ?? ""
+        browserProfile = try container.decodeIfPresent(BrowserProfileRef.self, forKey: .browserProfile)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
+        badge = try container.decodeIfPresent(String.self, forKey: .badge)
         // A layout this build does not know — from a newer one — falls back to the
         // default rather than making the whole file unreadable. Before there were
         // three, `stacked` chose between the first two.
@@ -294,6 +407,30 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             .flatMap(AccessoryLayout.init(rawValue:)) ?? .ring
         hiddenAccessoryIDs = try container.decodeIfPresent([String].self, forKey: .hiddenAccessoryIDs) ?? []
         showsMacBattery = try container.decodeIfPresent(Bool.self, forKey: .showsMacBattery) ?? false
+    }
+
+    /// Writes `apps` beside `stack` too, so a build from before launchers could
+    /// join a stack still reads its apps.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(anchor, forKey: .anchor)
+        try container.encodeIfPresent(path, forKey: .path)
+        try container.encode(stack, forKey: .stack)
+        try container.encode(apps, forKey: .apps)
+        try container.encode(agentsLayout, forKey: .agentsLayout)
+        try container.encode(showsControls, forKey: .showsControls)
+        try container.encode(usageLayout, forKey: .usageLayout)
+        try container.encode(usageServices, forKey: .usageServices)
+        try container.encode(accessoryLayout, forKey: .accessoryLayout)
+        try container.encode(hiddenAccessoryIDs, forKey: .hiddenAccessoryIDs)
+        try container.encode(showsMacBattery, forKey: .showsMacBattery)
+        try container.encode(arguments, forKey: .arguments)
+        try container.encodeIfPresent(browserProfile, forKey: .browserProfile)
+        try container.encodeIfPresent(label, forKey: .label)
+        try container.encodeIfPresent(iconPath, forKey: .iconPath)
+        try container.encodeIfPresent(badge, forKey: .badge)
     }
 }
 

@@ -34,16 +34,18 @@ final class DockTooltipController {
     private func show(title: String, subtitle: String?, edge: DockStripEdge, tile: CGRect) {
         makePanelIfNeeded()
         guard let panel, let hosting else { return }
-        hosting.rootView = DockTooltipView(title: title, subtitle: subtitle)
-        hosting.layoutSubtreeIfNeeded()
-        let size = hosting.fittingSize
-
         // Centred on the tile along the dock, and just clear of the dock's panel on
         // its far side. The panel is the slab plus the headroom magnified tiles grow
         // into, so the tip stays above a tile at full magnification. Away from the
         // dock's panel — the editor's preview — it sits off the tile instead.
         let mouse = NSEvent.mouseLocation
         let window = NSApp.window(withWindowNumber: NSWindow.windowNumber(at: mouse, belowWindowWithWindowNumber: 0))
+        // Drawn as the dock's own slab is, so the tip belongs to it.
+        let slab = window.flatMap { CustomDockWindowController.shared.slabLook(in: $0) }
+        hosting.rootView = DockTooltipView(title: title, subtitle: subtitle, look: slab?.look ?? DockLook(), tint: slab?.tint)
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+
         let tileOnScreen = window.flatMap { Self.screenRect(for: tile, in: $0) }
         let center = tileOnScreen.map { NSPoint(x: $0.midX, y: $0.midY) } ?? mouse
         let dock = window.flatMap { CustomDockWindowController.shared.slabFrame(in: $0) != nil ? $0.frame : nil }
@@ -89,7 +91,7 @@ final class DockTooltipController {
 
     private func makePanelIfNeeded() {
         guard panel == nil else { return }
-        let hosting = NSHostingView(rootView: DockTooltipView(title: "", subtitle: nil))
+        let hosting = NSHostingView(rootView: DockTooltipView(title: "", subtitle: nil, look: DockLook(), tint: nil))
         let panel = NSPanel(
             contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -114,6 +116,9 @@ final class DockTooltipController {
 struct DockTooltipView: View {
     let title: String
     let subtitle: String?
+    /// The dock's slab, so the tip is drawn as the dock is.
+    let look: DockLook
+    let tint: Color?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -132,15 +137,11 @@ struct DockTooltipView: View {
         .fixedSize()
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(DockPalette.slab)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(DockPalette.rim, lineWidth: 1)
-                )
-        )
+        .background(DockSlab(look: look, tint: tint, cornerRadius: 8))
+        .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
     }
+
+    @Environment(\.colorScheme) private var systemColorScheme
 }
 
 /// The edge the dock lives on, so tips know which way to go.

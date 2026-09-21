@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum EditorTab: String, CaseIterable, Identifiable {
-    case items, dock, customDock, desktop
+    case items, dock, customDock, widgets, desktop
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ private enum EditorTab: String, CaseIterable, Identifiable {
         case .items: return "Items"
         case .dock: return "Dock"
         case .customDock: return "Custom Dock"
+        case .widgets: return "Widgets"
         case .desktop: return "Desktop"
         }
     }
@@ -163,7 +164,8 @@ struct ProfileEditorView: View {
     private func openCustomDockIfAsked() {
         guard router.pendingCustomDock == profile.id else { return }
         router.pendingCustomDock = nil
-        tab = .customDock
+        tab = router.pendingWidgets ? .widgets : .customDock
+        router.pendingWidgets = false
     }
 
     // MARK: - Tabs
@@ -186,6 +188,10 @@ struct ProfileEditorView: View {
                             dot(profile.appearance.enabled ? Color.secondary : .clear)
                         case .customDock:
                             dot(profile.customDock.isActive ? Color.accentColor : .clear)
+                        case .widgets:
+                            Text("\(profile.customDock.widgets.count)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
                         case .desktop:
                             dot(profile.desktop.isActive ? Color.accentColor : .clear)
                         }
@@ -218,7 +224,8 @@ struct ProfileEditorView: View {
             switch tab {
             case .items: itemsTab
             case .dock: dockTab
-            case .customDock: CustomDockOptionsView(options: $profile.customDock, tint: profile.color.color)
+            case .customDock: CustomDockOptionsView(options: $profile.customDock, tint: profile.color.color, part: .dock)
+            case .widgets: CustomDockOptionsView(options: $profile.customDock, tint: profile.color.color, part: .widgets)
             case .desktop: DesktopOptionsView(options: $profile.desktop)
             }
         }

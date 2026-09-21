@@ -5,6 +5,55 @@ All notable changes to Dock Profiler are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.9.0] - 2026-09-21
+
+### Added
+
+- **Launcher widget: an app opened with arguments of your own.** Chrome as
+  your work profile, VS Code on a project, a browser in incognito — each on a
+  tile of its own on the custom dock. On its card in the editor choose the
+  app (or drop it from Finder), type the arguments as you would on a command
+  line, and, for a browser the dock knows, pick one of its profiles to fill
+  in the browser's own switch — the profile's picture, or its initial, then
+  sits badged on the app's icon, so two Chromes are told apart; type a badge
+  of your own for two profiles whose names start alike. Give it a name, and
+  an icon of its own: any image, or another app's, chosen or dropped on the card. On the
+  dock it is an app tile — click to open, the running dot underneath, the
+  app, profile and icon changeable from its menu.
+- **Launchers in an App Stack.** A stack holds launchers beside its apps:
+  drag one in — its card onto the stack's card in the editor, or its tile
+  onto the stack on the dock, which swells to take it, as an app tile can be
+  too — or add one on the stack's card, or make a launcher of an app already
+  in the stack. Click a launcher in the stack's row to set it up there; drag
+  the icons to reorder the stack; drag a launcher off the row to move it out
+  again. In the stack's panel on the dock, hold and drag an item to reorder,
+  carry it off the panel to take it out — an app back into the app row, a
+  launcher to a tile of its own — and right-click for Open, Show in Finder,
+  Make a Launcher, Move Out of Stack and Remove from Stack.
+- **A Widgets tab.** The profile editor's widgets have moved out of the
+  Custom Dock tab — which keeps the dock itself: where it sits, how it looks
+  — onto a tab of their own beside it, with Add widget at the top. Each
+  widget's card is folded to a line until clicked open, so a dock with many
+  widgets reads as a list. Drag a card by its header to reorder. Right-click
+  a widget on the dock and **Widget Settings…** opens this tab.
+
+### Changed
+
+- **Tips and stacks look like the dock.** The tooltip over a tile and the
+  panel a stack opens into are drawn on the dock's own slab — blurred, glass
+  or solid, tinted with the profile's colour if the dock is, light or dark
+  with it — rather than a flat grey of their own. In a stack's grid the
+  running dot sits right under the icon, as under a dock tile, instead of
+  along the cell's bottom edge.
+- **Menus open where the Dock opens them.** A right-click on a tile — an app,
+  a widget — puts its menu off the dock's edge, on the far side of the tile
+  and centred on it, with the Dock's small tail pointing at the tile, rather
+  than under the pointer; the slab's own menu is centred on the click, as the
+  Dock's divider menu is. Needs macOS 14.4 for the widgets' menus; before
+  that they open at the pointer as they did.
+
 ## [1.8.0] - 2026-09-21
 
 ### Added

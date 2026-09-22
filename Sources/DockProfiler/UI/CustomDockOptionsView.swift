@@ -988,12 +988,42 @@ private struct WidgetSettingsCard<HeaderMenu: View>: View {
         case .accessories:
             accessorySettings
         case .nowPlaying:
-            Toggle("Show previous and next buttons", isOn: $tile.showsControls)
-                .controlSize(.small)
+            nowPlayingSettings
         case .aiUsage:
             usageSettings
         default:
             EmptyView()
+        }
+    }
+
+    /// How much of the track is drawn, and whether the buttons sit beside it. The
+    /// widget is only as wide as its layout lets it be, so a long title crops
+    /// instead of pushing the rest of the dock along.
+    private var nowPlayingSettings: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Layout", selection: $tile.nowPlayingLayout) {
+                ForEach(NowPlayingLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(maxWidth: 220)
+            Toggle("Show previous and next buttons", isOn: $tile.showsControls)
+                .controlSize(.small)
+            Text(nowPlayingHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var nowPlayingHint: String {
+        switch tile.nowPlayingLayout {
+        case .full: return "The title and the artist beside the art, cropped once the title runs long. The whole track is in the tooltip."
+        case .compact: return "The title alone beside the art, on one line. The artist is in the tooltip."
+        case .artwork: return "The art alone, a tile the size of an app icon. The track is in the tooltip."
         }
     }
 

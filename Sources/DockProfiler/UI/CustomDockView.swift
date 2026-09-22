@@ -9,6 +9,12 @@ private struct DockTileSizeKey: EnvironmentKey {
     static let defaultValue: CGFloat = 56
 }
 
+/// How far a tile sits inside the slab's edge: the slab's padding. A tile's menu
+/// opens clear of the slab, not of the tile, so it needs to know.
+private struct DockSlabInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 private struct DockVerticalKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -56,6 +62,11 @@ extension EnvironmentValues {
     var dockTileSize: CGFloat {
         get { self[DockTileSizeKey.self] }
         set { self[DockTileSizeKey.self] = newValue }
+    }
+
+    var dockSlabInset: CGFloat {
+        get { self[DockSlabInsetKey.self] }
+        set { self[DockSlabInsetKey.self] = newValue }
     }
 
     var dockVertical: Bool {
@@ -110,6 +121,12 @@ extension EnvironmentValues {
         set { self[DockStackMoveOutKey.self] = newValue }
     }
 
+    /// Folds the tile into an app stack, from its context menu; nil where it cannot be stacked.
+    var dockStacking: DockStacking? {
+        get { self[DockStackingKey.self] }
+        set { self[DockStackingKey.self] = newValue }
+    }
+
     /// A held tile is over this stack: letting go folds it in.
     var dockStackTargeted: Bool {
         get { self[DockStackTargetedKey.self] }
@@ -141,6 +158,30 @@ private struct DockStackMoveOutKey: EnvironmentKey {
     static let defaultValue: ((AppStackEntry, UUID) -> Void)? = nil
 }
 
+/// Folds a tile into an app stack from its context menu — the same as dragging
+/// it onto one: into a stack already in the row, or into a new stack made in
+/// the tile's place. Set on each app tile and launcher the row can rearrange.
+struct DockStacking {
+    /// The app stacks in the row the tile could join, in their order.
+    var stacks: [WidgetTile]
+    /// Folds the tile into the stack with the id, or with nil into a new one.
+    var add: (UUID?) -> Void
+}
+
+private struct DockStackingKey: EnvironmentKey {
+    static let defaultValue: DockStacking? = nil
+}
+
+private extension WidgetTile {
+    /// App stack: the name it goes by in a menu listing several — its first few
+    /// apps, since every stack shares the kind's title.
+    var stackMenuTitle: String {
+        let names = stack.prefix(3).map(\.title)
+        guard !names.isEmpty else { return "Empty Stack" }
+        return names.joined(separator: ", ") + (stack.count > names.count ? "…" : "")
+    }
+}
+
 // MARK: - Context menus
 
 /// A tile's context menu in the dock: Remove from Dock for one that is in the
@@ -155,15 +196,17 @@ private struct DockContextMenu<Items: View>: ViewModifier {
     @Environment(\.dockSettingsAction) private var openSettings
     @Environment(\.dockWidgetsAction) private var openWidgets
     @Environment(\.dockRemoveAction) private var remove
+    @Environment(\.dockStacking) private var stacking
     @Environment(\.dockWidget) private var widget
     @Environment(\.dockWidgetUpdate) private var update
     @Environment(\.dockEdge) private var edge
+    @Environment(\.dockSlabInset) private var slabInset
 
     private var hasSettings: Bool { widget?.kind.isConfigurable == true && update != nil }
 
     func body(content: Content) -> some View {
         if #available(macOS 14.4, *) {
-            content.overlay(DockMenuAnchor(edge: edge) {
+            content.overlay(DockMenuAnchor(edge: edge, inset: slabInset) {
                 DockTooltipController.shared.cancel()
                 return NSHostingMenu(rootView: menu)
             })
@@ -177,15 +220,32 @@ private struct DockContextMenu<Items: View>: ViewModifier {
     private var menu: some View {
         Group {
             if let remove { Button("Remove from Dock", action: remove) }
+            if let stacking { DockStackingMenu(stacking: stacking) }
             // A widget's menu leads to the Widgets tab, where its card is.
             if let openWidgets { Button("Widget Settings…", action: openWidgets) }
             else if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
-            if remove != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
+            if remove != nil || stacking != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
             items
             if hasSettings, Items.self != EmptyView.self { Divider() }
             if hasSettings, let widget, let update {
                 WidgetSettingsMenu(tile: widget, update: update)
             }
+        }
+    }
+}
+
+/// Add to Stack: the stacks already in the row, then a new one. As menu items
+/// for `DockContextMenu`; `DockStacking.menuItem` is the same for an `NSMenu`.
+private struct DockStackingMenu: View {
+    let stacking: DockStacking
+
+    var body: some View {
+        Menu("Add to Stack") {
+            ForEach(stacking.stacks) { stack in
+                Button(stack.stackMenuTitle) { stacking.add(stack.id) }
+            }
+            if !stacking.stacks.isEmpty { Divider() }
+            Button("New Stack") { stacking.add(nil) }
         }
     }
 }
@@ -240,6 +300,11 @@ private struct WidgetSettingsMenu: View {
             }
             .pickerStyle(.inline)
         case .nowPlaying:
+            Picker("Layout", selection: binding(\.nowPlayingLayout)) {
+                ForEach(NowPlayingLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
             Toggle("Show Previous and Next Buttons", isOn: binding(\.showsControls))
         case .aiUsage:
             Picker("Layout", selection: binding(\.usageLayout)) {
@@ -561,6 +626,7 @@ struct CustomDockView: View {
         // The profile has taken the dragged cap; the draft has done its job.
         .onChange(of: maxLength) { draftMax = nil }
         .environment(\.dockTileSize, tileSize)
+        .environment(\.dockSlabInset, padding)
         .environment(\.dockVertical, vertical)
         .environment(\.dockEdge, edge)
     }
@@ -894,14 +960,24 @@ struct CustomDockView: View {
         }
     }
 
-    /// Folds the held item into the stack: out of the row, if it was in it, and
-    /// onto the end of the stack's entries.
-    private func drop(_ item: DockStripItem, into stackID: UUID) {
+    /// Folds the item into the stack with the id: out of the row, if it was in
+    /// it, and onto the end of the stack's entries. With nil, into a new stack
+    /// where the item was — or at the end of the row, for a running app that
+    /// was not in it — keeping a launcher's anchor so the stack stays put in a
+    /// combined dock.
+    private func fold(_ item: DockStripItem, into stackID: UUID?) {
         guard let entry = Self.stackEntry(for: item) else { return }
         var row = items.filter { $0.id != item.id }
-        guard let index = row.firstIndex(where: { $0.id == stackID }), var stack = row[index].widget else { return }
-        stack.stack.append(entry)
-        row[index] = .widget(stack)
+        if let stackID {
+            guard let index = row.firstIndex(where: { $0.id == stackID }), var stack = row[index].widget else { return }
+            stack.stack.append(entry)
+            row[index] = .widget(stack)
+        } else {
+            var stack = WidgetTile(kind: .appStack)
+            stack.stack = [entry]
+            if let launcher = item.widget { stack.anchor = launcher.anchor }
+            row.insert(.widget(stack), at: items.firstIndex { $0.id == item.id } ?? row.count)
+        }
         onReorder?(row)
     }
 
@@ -985,7 +1061,7 @@ struct CustomDockView: View {
         if let dropTarget, let item = heldItem {
             self.dropTarget = nil
             pendingOrder = nil
-            withAnimation(.easeInOut(duration: 0.15)) { drop(item, into: dropTarget) }
+            withAnimation(.easeInOut(duration: 0.15)) { fold(item, into: dropTarget) }
             return
         }
         if let order = pendingOrder, order.map(\.id) != items.map(\.id) {
@@ -1032,7 +1108,20 @@ struct CustomDockView: View {
             }
         }
         .environment(\.dockRemoveAction, removable ? { remove(item.id) } : nil)
+        .environment(\.dockStacking, stacking(for: item))
         .environment(\.dockStackTargeted, dropTarget == item.id)
+    }
+
+    /// Add to Stack for an app tile or a launcher, when the row can be rearranged:
+    /// the other stacks in the row to join, or a new one in the tile's place. A
+    /// running app after the divider can be stacked too; it joins the profile
+    /// that way, as a drag onto a stack puts it there.
+    private func stacking(for item: DockStripItem) -> DockStacking? {
+        guard onReorder != nil, Self.stackEntry(for: item) != nil else { return nil }
+        let stacks = items.compactMap(\.widget).filter { $0.kind == .appStack && $0.id != item.id }
+        return DockStacking(stacks: stacks) { stackID in
+            withAnimation(.easeInOut(duration: 0.15)) { fold(item, into: stackID) }
+        }
     }
 
     /// Puts a running app into the profile, at the end: Keep in Dock. The same
@@ -1212,7 +1301,9 @@ private struct AppTileView: View {
     @Environment(\.dockEdge) private var edge
     @Environment(\.dockPinAction) private var pin
     @Environment(\.dockRemoveAction) private var remove
+    @Environment(\.dockStacking) private var stacking
     @Environment(\.dockSettingsAction) private var openSettings
+    @Environment(\.dockSlabInset) private var slabInset
     @ObservedObject private var running = RunningAppsMonitor.shared
     @ObservedObject private var badges = DockBadgeMonitor.shared
     @State private var hovering = false
@@ -1238,7 +1329,7 @@ private struct AppTileView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .dockTooltip(tile.label, tile.isMissing ? "Moved or deleted" : nil)
-        .overlay(DockMenuAnchor(edge: edge, build: buildMenu))
+        .overlay(DockMenuAnchor(edge: edge, inset: slabInset, build: buildMenu))
     }
 
     @ViewBuilder
@@ -1276,7 +1367,7 @@ private struct AppTileView: View {
     /// New Window and a browser's profiles, then Options, then Show All Windows,
     /// Hide and Quit;
     /// for one that is not running, the profiles, Options and Open — after
-    /// Remove from Dock and the dock's settings, which come first. Recent
+    /// Remove from Dock, Add to Stack and the dock's settings, which come first. Recent
     /// documents are the one thing missing — macOS hands an app's list to that
     /// app alone. Built afresh on every right-click, so the windows and profiles
     /// are the ones there now.
@@ -1286,6 +1377,7 @@ private struct AppTileView: View {
         // The dock's own items first, where they are found without scrolling past
         // the windows; the same place `DockContextMenu` gives the widgets.
         if let remove { menu.addItem("Remove from Dock") { remove() } }
+        if let stacking { menu.addItem(stacking.menuItem) }
         if let openSettings { menu.addItem("Custom Dock Settings…") { openSettings() } }
         if !menu.items.isEmpty { menu.addItem(.separator()) }
         if tile.kind == .app {
@@ -1392,6 +1484,8 @@ private struct AppTileView: View {
 /// hover or a drag goes through to the tile underneath.
 private struct DockMenuAnchor: NSViewRepresentable {
     let edge: DockStripEdge
+    /// From this view's edge out to the slab's, which the menu opens clear of.
+    var inset: CGFloat = 0
     var atPointer: Bool = false
     let build: () -> NSMenu
 
@@ -1399,12 +1493,14 @@ private struct DockMenuAnchor: NSViewRepresentable {
 
     func updateNSView(_ view: MenuView, context: Context) {
         view.edge = edge
+        view.inset = inset
         view.atPointer = atPointer
         view.build = build
     }
 
     final class MenuView: NSView {
         var edge: DockStripEdge = .bottom
+        var inset: CGFloat = 0
         var atPointer = false
         var build: (() -> NSMenu)?
 
@@ -1428,108 +1524,47 @@ private struct DockMenuAnchor: NSViewRepresentable {
             }
         }
 
-        /// Lays the menu's top-left corner where it sits clear of the tile on the
-        /// dock's far side, centred across the tile, with the tail between; AppKit
+        /// Lays the menu's top-left corner where it sits clear of the slab on the
+        /// dock's far side, centred across the tile, with a gap between; AppKit
         /// keeps the menu on screen from there. The view is not flipped: y runs up.
         private func open(_ event: NSEvent) {
-            guard let menu = build?(), !menu.items.isEmpty, let window else { return }
+            guard let menu = build?(), window != nil else { return }
+            // SwiftUI puts a separator on each side of a `Section`, doubling the
+            // one the menu has there. AppKit shows one, but `size` counts both —
+            // a row's worth — and the menu would open that far from the dock.
+            var lastWasSeparator = true
+            for item in menu.items {
+                if item.isSeparatorItem {
+                    if lastWasSeparator { menu.removeItem(item) } else { lastWasSeparator = true }
+                } else {
+                    lastWasSeparator = false
+                }
+            }
+            if let last = menu.items.last, last.isSeparatorItem { menu.removeItem(last) }
+            guard !menu.items.isEmpty else { return }
             let size = menu.size
             let click = convert(event.locationInWindow, from: nil)
             let centre = atPointer ? click : NSPoint(x: bounds.midX, y: bounds.midY)
-            let gap = MenuTail.tip + MenuTail.height
-            let across = MenuTail.width, along = MenuTail.height + MenuTail.overlap
-            let corner: NSPoint
-            let tail: NSRect
+            let gap = Self.gap + inset
+            var corner: NSPoint
             switch edge {
-            case .bottom:
-                corner = NSPoint(x: centre.x - size.width / 2, y: bounds.maxY + gap + size.height)
-                tail = NSRect(x: centre.x - across / 2, y: bounds.maxY + MenuTail.tip, width: across, height: along)
-            case .top:
-                corner = NSPoint(x: centre.x - size.width / 2, y: bounds.minY - gap)
-                tail = NSRect(x: centre.x - across / 2, y: bounds.minY - MenuTail.tip - along, width: across, height: along)
-            case .leading:
-                corner = NSPoint(x: bounds.maxX + gap, y: centre.y + size.height / 2)
-                tail = NSRect(x: bounds.maxX + MenuTail.tip, y: centre.y - across / 2, width: along, height: across)
-            case .trailing:
-                corner = NSPoint(x: bounds.minX - gap - size.width, y: centre.y + size.height / 2)
-                tail = NSRect(x: bounds.minX - MenuTail.tip - along, y: centre.y - across / 2, width: along, height: across)
+            case .bottom: corner = NSPoint(x: centre.x - size.width / 2, y: bounds.maxY + gap + size.height)
+            case .top: corner = NSPoint(x: centre.x - size.width / 2, y: bounds.minY - gap)
+            case .leading: corner = NSPoint(x: bounds.maxX + gap, y: centre.y + size.height / 2)
+            case .trailing: corner = NSPoint(x: bounds.minX - gap - size.width, y: centre.y + size.height / 2)
             }
-            let pointer = MenuTail(
-                frame: window.convertToScreen(convert(tail, to: nil)),
-                edge: edge,
-                appearance: effectiveAppearance
-            )
-            pointer.orderFront(nil)
+            // AppKit meets the point with the first item's row, not the menu's edge,
+            // so the menu lands that much higher than asked.
+            corner.y -= Self.menuInset
             menu.popUp(positioning: nil, at: corner, in: self)
-            pointer.close()
         }
-    }
-}
 
-/// The Dock's menus end in a small tail pointing at the tile; AppKit's do not,
-/// so one is drawn in a window of its own — the menu's material, masked to a
-/// triangle — with its base a point under the menu's edge, so the two read as
-/// one shape, for as long as the menu is up. Takes no clicks and no focus.
-private final class MenuTail: NSPanel {
-    /// Across the base.
-    static let width: CGFloat = 14
-    /// Base to tip.
-    static let height: CGFloat = 7
-    /// Between the tip and the tile.
-    static let tip: CGFloat = 2
-    /// How far the base runs on under the menu.
-    static let overlap: CGFloat = 1
+        /// Between the slab's edge and the menu, so the two read apart.
+        private static let gap: CGFloat = 8
 
-    init(frame: NSRect, edge: DockStripEdge, appearance: NSAppearance?) {
-        super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = false
-        level = .popUpMenu
-        ignoresMouseEvents = true
-        collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-        self.appearance = appearance
-        let material = NSVisualEffectView(frame: NSRect(origin: .zero, size: frame.size))
-        material.material = .menu
-        material.blendingMode = .behindWindow
-        material.state = .active
-        material.maskImage = Self.mask(size: frame.size, edge: edge)
-        contentView = material
-    }
-
-    /// The tip points at the tile — down on a bottom dock — and the base sits on
-    /// the menu's side.
-    private static func mask(size: NSSize, edge: DockStripEdge) -> NSImage {
-        NSImage(size: size, flipped: false) { rect in
-            let base = MenuTail.overlap
-            let path = NSBezierPath()
-            switch edge {
-            case .bottom:
-                path.move(to: NSPoint(x: rect.minX, y: rect.maxY))
-                path.line(to: NSPoint(x: rect.midX, y: rect.minY))
-                path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
-                path.appendRect(NSRect(x: rect.minX, y: rect.maxY - base, width: rect.width, height: base))
-            case .top:
-                path.move(to: NSPoint(x: rect.minX, y: rect.minY))
-                path.line(to: NSPoint(x: rect.midX, y: rect.maxY))
-                path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
-                path.appendRect(NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: base))
-            case .leading:
-                path.move(to: NSPoint(x: rect.maxX, y: rect.minY))
-                path.line(to: NSPoint(x: rect.minX, y: rect.midY))
-                path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
-                path.appendRect(NSRect(x: rect.maxX - base, y: rect.minY, width: base, height: rect.height))
-            case .trailing:
-                path.move(to: NSPoint(x: rect.minX, y: rect.minY))
-                path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
-                path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
-                path.appendRect(NSRect(x: rect.minX, y: rect.minY, width: base, height: rect.height))
-            }
-            path.close()
-            NSColor.black.setFill()
-            path.fill()
-            return true
-        }
+        /// How far above the point given to `popUp` AppKit lays the menu's top:
+        /// the padding over its first item.
+        private static let menuInset: CGFloat = 5
     }
 }
 
@@ -1540,6 +1575,19 @@ private final class MenuAction: NSObject {
     init(_ perform: @escaping () -> Void) { self.perform = perform }
 
     @objc func fire(_ sender: Any?) { perform() }
+}
+
+private extension DockStacking {
+    /// Add to Stack for an `NSMenu`: what `DockStackingMenu` is for SwiftUI's.
+    var menuItem: NSMenuItem {
+        let submenu = NSMenu(title: "Add to Stack")
+        for stack in stacks { submenu.addItem(stack.stackMenuTitle) { add(stack.id) } }
+        if !stacks.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem("New Stack") { add(nil) }
+        let item = NSMenuItem(title: "Add to Stack", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
 }
 
 private extension NSMenu {

@@ -154,6 +154,10 @@ it in.
   five the rest fold into a menu. Click for Bluetooth settings.
 - **Now Playing** — the track in Music or Spotify, with its album art. Click to play
   or pause; skip from the context menu, or turn on previous/next buttons on its card.
+  **Layout** on its card sets how wide it may get: **Full**, the title and the artist
+  beside the art; **Compact**, the title alone on one line; **Artwork**, the art alone
+  on a tile the size of an app icon. A title too long for the layout is cropped rather
+  than pushing the dock wider — the whole track is in the tooltip.
 - **Profiles** — the active profile; click for the list and switch without going to
   the menu bar.
 - **Trash** — full or empty. Click to open it, drop files on it to delete them, empty

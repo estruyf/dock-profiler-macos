@@ -990,9 +990,10 @@ struct ProfilesWidget: View {
 // MARK: - Now playing
 
 /// What Music or Spotify is playing: the album art — or the player's icon until it
-/// arrives — with the track beside it. Click to play or pause; skip from the context
-/// menu, or from the buttons when the widget is set to show them. In a column the
-/// card grows taller to fit the buttons under the art.
+/// arrives — with as much of the track beside it as the layout asks for. Click to
+/// play or pause; skip from the context menu, or from the buttons when the widget
+/// is set to show them. In a column the card grows taller to fit the buttons under
+/// the art.
 struct NowPlayingWidget: View {
     let tile: WidgetTile
 
@@ -1003,7 +1004,11 @@ struct NowPlayingWidget: View {
     @State private var hovering = false
 
     private var track: NowPlayingTrack? { monitor.track }
+    private var layout: NowPlayingLayout { tile.nowPlayingLayout }
     private var tall: Bool { vertical && tile.showsControls }
+    /// The art alone on a tile the size of an app icon: always in a column, and in
+    /// a row when the layout is the art and there are no buttons to sit beside it.
+    private var square: Bool { vertical || (layout == .artwork && !tile.showsControls) }
 
     var body: some View {
         Group {
@@ -1040,7 +1045,7 @@ struct NowPlayingWidget: View {
                 }
             }
         }
-        .widgetCard(square: vertical, height: tall ? size * 1.36 : nil)
+        .widgetCard(square: square, height: tall ? size * 1.36 : nil)
         .overlay(
             RoundedRectangle(cornerRadius: size * 0.21, style: .continuous)
                 .fill(DockPalette.onSlab.opacity(hovering ? 0.08 : 0))
@@ -1071,25 +1076,38 @@ struct NowPlayingWidget: View {
             )
     }
 
+    /// The art with what the layout puts beside it: the title and the artist, the
+    /// title alone, or nothing — and in a column, a play glyph under the art, since
+    /// there is no room for words. Each line stops at the layout's width, so a long
+    /// title crops rather than pushing the dock wider; the whole of it is in the
+    /// tooltip.
     private var trackView: some View {
-        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
-        return layout {
-            artwork(side: environment.scaled(vertical ? 24 : 30))
-            if vertical {
-                Image(systemName: track?.isPlaying == true ? "pause.fill" : "play.fill")
-                    .font(.system(size: environment.scaled(9), weight: .bold))
-                    .foregroundStyle(DockPalette.onSlab.opacity(track == nil ? 0.4 : 0.8))
+        let stack = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
+        return stack {
+            if layout == .artwork {
+                // Play and pause sit on the art, unless the buttons beside it already carry them.
+                let art = artwork(side: environment.scaled(vertical ? 34 : 38))
+                if square { art.overlay(playBadge) } else { art }
             } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(track?.title ?? "Not playing")
-                        .font(.system(size: environment.scaled(13), weight: .semibold))
-                        .lineLimit(1)
-                    Text(track.map { $0.artist.isEmpty ? $0.player.title : $0.artist } ?? "Music or Spotify")
-                        .font(.system(size: environment.scaled(10), weight: .medium))
-                        .foregroundStyle(DockPalette.onSlab.opacity(0.6))
-                        .lineLimit(1)
+                artwork(side: environment.scaled(vertical ? 24 : 30))
+                if vertical {
+                    Image(systemName: track?.isPlaying == true ? "pause.fill" : "play.fill")
+                        .font(.system(size: environment.scaled(9), weight: .bold))
+                        .foregroundStyle(DockPalette.onSlab.opacity(track == nil ? 0.4 : 0.8))
+                } else {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(track?.title ?? "Not playing")
+                            .font(.system(size: environment.scaled(13), weight: .semibold))
+                            .lineLimit(1)
+                        if layout == .full {
+                            Text(track.map { $0.artist.isEmpty ? $0.player.title : $0.artist } ?? "Music or Spotify")
+                                .font(.system(size: environment.scaled(10), weight: .medium))
+                                .foregroundStyle(DockPalette.onSlab.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                    }
+                    .frame(maxWidth: environment.scaled(layout.textWidth), alignment: .leading)
                 }
-                .frame(maxWidth: environment.scaled(180), alignment: .leading)
             }
         }
         .fixedSize(horizontal: !vertical, vertical: false)

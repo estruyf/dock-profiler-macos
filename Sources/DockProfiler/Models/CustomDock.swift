@@ -161,6 +161,46 @@ enum AgentsLayout: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the Now Playing widget draws the track. A title has no length to speak of —
+/// a remix with three names on it widens the widget far past a short one — so the
+/// layouts differ in how much of the track they show, and each has a width it stops
+/// at. Whatever is cut off is in the tooltip.
+enum NowPlayingLayout: String, Codable, CaseIterable, Identifiable {
+    /// The art, with the title and the artist beside it.
+    case full
+    /// The art and the title alone, on one line, stopping sooner.
+    case compact
+    /// The art alone, a tile the size of an app icon.
+    case artwork
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .full: return "Full"
+        case .compact: return "Compact"
+        case .artwork: return "Artwork"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .full: return "Title and artist"
+        case .compact: return "Title alone"
+        case .artwork: return "The art alone"
+        }
+    }
+
+    /// How wide the track may grow beside the art, before the title is cut off.
+    var textWidth: CGFloat {
+        switch self {
+        case .full: return 180
+        case .compact: return 104
+        case .artwork: return 0
+        }
+    }
+}
+
 /// How the Accessories widget draws each battery: a tile the size of an app icon
 /// with the device's icon inside a ring that empties with it.
 enum AccessoryLayout: String, Codable, CaseIterable, Identifiable {
@@ -277,7 +317,8 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     var accessoryLayout: AccessoryLayout = .ring
     var hiddenAccessoryIDs: [String] = []
     var showsMacBattery: Bool = false
-    /// Now playing: previous and next buttons beside the track.
+    /// Now playing: how much of the track is drawn, and previous and next buttons beside it.
+    var nowPlayingLayout: NowPlayingLayout = .full
     var showsControls: Bool = false
     /// AI usage: how the allowances are drawn, and which services are tracked, in order.
     var usageLayout: UsageLayout = .rings
@@ -345,7 +386,9 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             if showsMacBattery { shown += " and this Mac" }
             return "\(shown), \(accessoryLayout.summary)"
         case .nowPlaying:
-            return showsControls ? "Music or Spotify, with skip buttons" : kind.summary
+            var parts = [nowPlayingLayout == .full ? kind.summary : "Music or Spotify, \(nowPlayingLayout.summary.lowercased())"]
+            if showsControls { parts.append("with skip buttons") }
+            return parts.joined(separator: ", ")
         case .aiUsage:
             guard !usageServices.isEmpty else { return "Nothing tracked yet" }
             let names = usageServices.map(\.title)
@@ -370,7 +413,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
 
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, anchor, path, apps, stack, agentsLayout, showsControls, usageLayout, usageServices
+        case id, kind, anchor, path, apps, stack, agentsLayout, nowPlayingLayout, showsControls, usageLayout, usageServices
         case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
         case arguments, browserProfile, label, iconPath, badge, showsProfilePicture
     }
@@ -403,6 +446,10 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         let stacked = try legacy.decodeIfPresent(Bool.self, forKey: .stacked) ?? false
         agentsLayout = (try? container.decodeIfPresent(String.self, forKey: .agentsLayout))
             .flatMap(AgentsLayout.init(rawValue:)) ?? (stacked ? .one : .each)
+        // A layout this build does not know — from a newer one — falls back to the
+        // full one rather than making the whole file unreadable.
+        nowPlayingLayout = (try? container.decodeIfPresent(String.self, forKey: .nowPlayingLayout))
+            .flatMap(NowPlayingLayout.init(rawValue:)) ?? .full
         showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls) ?? false
         usageLayout = try container.decodeIfPresent(UsageLayout.self, forKey: .usageLayout) ?? .rings
         usageServices = try container.decodeIfPresent([UsageService].self, forKey: .usageServices) ?? UsageService.allCases
@@ -425,6 +472,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         try container.encode(stack, forKey: .stack)
         try container.encode(apps, forKey: .apps)
         try container.encode(agentsLayout, forKey: .agentsLayout)
+        try container.encode(nowPlayingLayout, forKey: .nowPlayingLayout)
         try container.encode(showsControls, forKey: .showsControls)
         try container.encode(usageLayout, forKey: .usageLayout)
         try container.encode(usageServices, forKey: .usageServices)

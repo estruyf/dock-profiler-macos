@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-22
+
+### Added
+
+- **Layouts for the Now Playing widget, so a long title cannot widen the dock.**
+  The widget used to grow with whatever was playing — a remix with three names on
+  it pushed everything else along, and the dock changed width with the track.
+  **Layout** on its card, and in the tile's own menu, now picks how much of the
+  track it shows: **Full**, the title and the artist beside the art, as before;
+  **Compact**, the title alone on one line, stopping sooner; **Artwork**, the art
+  alone on a tile the size of an app icon, with play and pause on it. Each stops
+  at a width of its own, so a title too long for it crops instead of widening the
+  dock; the whole track is in the tooltip either way. In a column the artwork
+  layout fills the tile with the art, in place of the art and a play glyph.
+
 ## [1.10.0] - 2026-09-22
 
 ### Added

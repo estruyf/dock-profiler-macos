@@ -24,12 +24,13 @@ as you go.
   app's open windows — across every instance, a check mark on the one in front, a
   diamond on a minimized one; pick one and it comes forward — then the app's own
   **New Window** (New Finder Window, New Viewer Window — whatever its File menu calls
-  it) for a running app that has one, then, on a browser, its **Profiles** (see
-  below), then Options (Keep in Dock, Show in Finder), Show All Windows, Hide and
-  Quit. The window list and the New Window item are read through Accessibility (see
-  [Permissions](./permissions.md)); without it the menu has an item that leads there.
-  Recent documents are the one thing the Dock's menu has and this one cannot: macOS
-  hands an app's list to that app alone. Hold a tile — an app or a widget — and drag
+  it) for a running app that has one, then, on VS Code, its **Recent Projects** and,
+  on a browser, its **Profiles** (both below), then Options (Keep in Dock, Show in
+  Finder), Show All Windows, Hide and Quit. The window list and the New Window item
+  are read through Accessibility (see [Permissions](./permissions.md)); without it the
+  menu has an item that leads there. Recent documents are the one thing the Dock's
+  menu has and this one cannot — VS Code's projects aside, macOS hands an app's list
+  to that app alone. Hold a tile — an app or a widget — and drag
   it off the dock to remove it, as in the Dock; widgets offer Remove from Dock on
   right-click too. Optionally, apps that are open but not in the profile follow after
   a divider, as the Dock does — hold one and drag it across the divider to keep it in
@@ -107,6 +108,19 @@ Canary builds), Microsoft Edge (and its channels), Brave, Vivaldi, Chromium, Fir
 profiles are open, so its are never marked; and as Firefox's own profile manager, a
 profile it already has open answers with its "already running" notice rather than
 another window. Arc is left out: its profiles belong to its spaces, not to windows.
+
+### Recent projects
+
+Right-click Visual Studio Code on the dock and its **Recent Projects** submenu lists
+the folders and workspaces from the editor's own File ▸ Open Recent, newest first,
+each with its folder icon and its name — the full path in the tooltip, for two folders
+named alike — and choosing one opens it, as dropping the folder on the editor would.
+Visual Studio Code and Visual Studio Code – Insiders are covered, each with its own
+list. Read from the menu bar the editor last wrote to disk, so there is nothing to set
+up and nothing to keep in sync; a folder that has since been moved or deleted is left
+out, and folders on a remote or in a container are too, since they need the editor's
+own window to reach. The list is the one the editor wrote when it last drew its menus,
+so a project opened while the editor is closed shows up the next time it runs.
 
 Menus open where the Dock opens them: off the dock's edge, on the far side of the
 tile and centred on it, a small tail pointing at the tile, rather than under the

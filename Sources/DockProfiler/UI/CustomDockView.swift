@@ -593,6 +593,7 @@ struct CustomDockView: View {
                             let frame = geometry.frame(in: .named("scroll"))
                             Color.clear.preference(key: ScrollOffsetKey.self, value: CGFloat?.some(-(vertical ? frame.minY : frame.minX)))
                         })
+                        .background(DockScrollerHider())
                     }
                     .scrollIndicators(.hidden)
                     .frame(width: vertical ? nil : window, height: vertical ? window : nil)
@@ -802,13 +803,8 @@ struct CustomDockView: View {
                 .frame(width: vertical ? nil : gripLength, height: vertical ? gripLength : nil)
                 .contentShape(Rectangle())
                 .animation(.easeOut(duration: 0.15), value: active)
-                .onHover { hovering in
-                    gripHovered = hovering
-                    if hovering { (vertical ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push() } else { NSCursor.pop() }
-                }
-                // The dock can go away under the pointer — a profile switch, say —
-                // and the arrow must not stay a resize cursor.
-                .onDisappear { if gripHovered { gripHovered = false; NSCursor.pop() } }
+                .onHover { gripHovered = $0 }
+                .background(DockCursorArea(cursor: gripCursor))
                 .dockTooltip(
                     vertical ? "Dock height" : "Dock width",
                     "Drag to limit it; double-click for all of it"
@@ -817,6 +813,9 @@ struct CustomDockView: View {
                 .gesture(gripGesture)
         }
     }
+
+    /// Which way the grip moves the dock's end.
+    private var gripCursor: NSCursor { vertical ? .resizeUpDown : .resizeLeftRight }
 
     /// The drag is read from the screen rather than the window: the panel moves
     /// under the pointer as the dock changes length.
@@ -831,12 +830,16 @@ struct CustomDockView: View {
                     DockTooltipController.shared.cancel()
                 }
                 guard let gripStart else { return }
+                // The pointer runs well past the grip while dragging, out of reach of
+                // its tracking area, so the cursor is set again on every step.
+                gripCursor.set()
                 // Screen y runs up; the grip is at a column's bottom end.
                 let outward: CGFloat = vertical || controlsAtStart ? -1 : 1
                 let length = gripStart.length + (along - gripStart.mouse) * outward
                 draftMax = min(max(length, minLength), screenLength ?? .infinity)
             }
             .onEnded { _ in
+                if !gripHovered { NSCursor.arrow.set() }
                 guard let draft = draftMax else { gripStart = nil; return }
                 gripStart = nil
                 // Out to where the strip fits, or as far as the screen goes, is no limit at all.
@@ -1209,6 +1212,87 @@ private struct DockPagerButton: View {
     }
 }
 
+/// The resize cursor over the grip, from AppKit rather than `NSCursor.push()`.
+/// The dock's panel never takes focus and the app is rarely the active one, so a
+/// pushed cursor is undone by whichever app is; a tracking area that stays active
+/// in an inactive window sets the cursor again on every update, and lets go of it
+/// when the pointer leaves — or when the dock goes away under it, a profile
+/// switch say. Sits behind the grip and takes no clicks of its own.
+private struct DockCursorArea: NSViewRepresentable {
+    let cursor: NSCursor
+
+    func makeNSView(context: Context) -> TrackingView { TrackingView() }
+
+    func updateNSView(_ view: TrackingView, context: Context) { view.cursor = cursor }
+
+    static func dismantleNSView(_ view: TrackingView, coordinator: ()) { view.release() }
+
+    final class TrackingView: NSView {
+        var cursor: NSCursor = .arrow {
+            didSet {
+                guard cursor != oldValue else { return }
+                window?.invalidateCursorRects(for: self)
+                if inside { cursor.set() }
+            }
+        }
+        private var inside = false
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(
+                rect: .zero,
+                options: [.cursorUpdate, .mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
+                owner: self
+            ))
+        }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: cursor) }
+        override func cursorUpdate(with event: NSEvent) { inside = true; cursor.set() }
+        override func mouseEntered(with event: NSEvent) { inside = true; cursor.set() }
+        override func mouseMoved(with event: NSEvent) { inside = true; cursor.set() }
+        override func mouseExited(with event: NSEvent) { release() }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { release() }
+        }
+
+        /// The arrow back, if this area was the one holding the cursor.
+        func release() {
+            guard inside else { return }
+            inside = false
+            NSCursor.arrow.set()
+        }
+
+        // The grip underneath takes the hover and the drag.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// Keeps the strip's scrollers out of the dock. `scrollIndicators(.hidden)` only
+/// covers the overlay ones; with "Show scroll bars: Always" in System Settings a
+/// legacy scroller is laid out inside the slab, and it appears the moment the grip
+/// makes the dock too short for the strip.
+private struct DockScrollerHider: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { HiderView() }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class HiderView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let scroll = enclosingScrollView else { return }
+            scroll.scrollerStyle = .overlay
+            scroll.hasHorizontalScroller = false
+            scroll.hasVerticalScroller = false
+            scroll.autohidesScrollers = true
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
 // MARK: - Magnification
 
 /// Reports where an item's slot is in the dock, for magnification and reordering.
@@ -1382,13 +1466,13 @@ private struct AppTileView: View {
     }
 
     /// The Dock's menu for an app tile, near enough: its open windows, then its
-    /// New Window and a browser's profiles, then Options, then Show All Windows,
-    /// Hide and Quit;
-    /// for one that is not running, the profiles, Options and Open — after
+    /// New Window, an editor's recent projects and a browser's profiles, then
+    /// Options, then Show All Windows, Hide and Quit;
+    /// for one that is not running, the projects, the profiles, Options and Open — after
     /// Remove from Dock, Add to Stack and the dock's settings, which come first. Recent
-    /// documents are the one thing missing — macOS hands an app's list to that
-    /// app alone. Built afresh on every right-click, so the windows and profiles
-    /// are the ones there now.
+    /// documents are the one thing missing for the rest — macOS hands an app's
+    /// list to that app alone. Built afresh on every right-click, so the windows,
+    /// projects and profiles are the ones there now.
     private func buildMenu() -> NSMenu {
         DockTooltipController.shared.cancel()
         let menu = NSMenu()
@@ -1407,6 +1491,7 @@ private struct AppTileView: View {
                 if let command = AppWindows.newWindow(of: app) {
                     menu.addItem(command.title) { command.perform() }
                 }
+                if let recentProjects { menu.addItem(recentProjects) }
                 if let profiles { menu.addItem(profiles) }
                 menu.addItem(options)
                 menu.addItem(.separator())
@@ -1416,6 +1501,7 @@ private struct AppTileView: View {
                 }
                 menu.addItem("Quit") { for instance in instances { instance.terminate() } }
             } else {
+                if let recentProjects { menu.addItem(recentProjects) }
                 if let profiles { menu.addItem(profiles) }
                 menu.addItem(options)
                 menu.addItem(.separator())
@@ -1457,6 +1543,26 @@ private struct AppTileView: View {
             }
         }
         if !windows.isEmpty { menu.addItem(.separator()) }
+    }
+
+    /// An editor's recent projects, as its own File ▸ Open Recent lists them:
+    /// the folder's icon and its name, newest first, and choosing one opens it
+    /// the way the editor would. Nil for any other app, and for an editor with
+    /// nothing in its list yet.
+    private var recentProjects: NSMenuItem? {
+        guard let identifier = tile.bundleIdentifier, let url, EditorRecents.isEditor(identifier) else { return nil }
+        let projects = EditorRecents.projects(of: identifier)
+        guard !projects.isEmpty else { return nil }
+        let submenu = NSMenu(title: "Recent Projects")
+        for project in projects {
+            let item = submenu.addItem(project.name) { EditorRecents.open(project, in: url) }
+            item.image = project.image
+            // The name alone does not tell two folders of the same name apart.
+            item.toolTip = project.path
+        }
+        let item = NSMenuItem(title: "Recent Projects", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     /// A browser's profiles, as its own Dock menu lists them: the account's

@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-09-22
+
+### Added
+
+- **VS Code's recent projects, on right-click.** The Dock keeps an app's recent
+  documents to itself — macOS hands that list to the app alone — so a tile's menu
+  could offer everything the Dock's does except the one thing you reach for most
+  on an editor: the project you had open yesterday. Right-clicking Visual Studio
+  Code on the custom dock now has a **Recent Projects** submenu, the folders and
+  workspaces of the editor's own File ▸ Open Recent, newest first, each with its
+  folder icon and its name and the full path in the tooltip; choosing one opens
+  it in the editor. Visual Studio Code and Visual Studio Code – Insiders each
+  bring their own list, read from the menu bar the editor last wrote to disk, so
+  there is nothing to set up and no extra permission to grant. Folders that have
+  been moved or deleted are left out, as are ones on a remote or in a container,
+  which need the editor's own window to reach.
+
+### Fixed
+
+- **The resize cursor over the dock's length grip.** Grab the grip that limits
+  how far the dock runs and the pointer was meant to become a resize arrow while
+  it was there. It often stayed a plain arrow, or kept the resize shape long
+  after the pointer had moved on: the cursor was pushed on a stack, and the
+  dock's panel never takes focus, so whichever app *was* active undid the push a
+  moment later — and a dock that goes away under the pointer, a profile switch
+  say, never popped it back. The grip now claims the cursor through a tracking
+  area that stays live in an inactive window, sets it again on every step of a
+  drag — the pointer runs well past the grip while dragging — and hands the
+  arrow back when the pointer leaves or the dock disappears.
+
+- **Scroll bars inside the dock.** With *Show scroll bars: Always* in System
+  Settings, a dock shortened with the grip grew a legacy scroller on the slab,
+  sitting among the tiles: SwiftUI's hidden scroll indicators only cover the
+  overlay kind. The strip now keeps its scrollers out whatever that setting says.
+
 ## [1.12.0] - 2026-09-22
 
 ### Added

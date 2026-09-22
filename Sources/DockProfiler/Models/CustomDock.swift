@@ -265,6 +265,10 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     /// Launcher: a letter or two on the icon's corner, in place of the profile's
     /// picture or initial — two profiles whose names start alike are told apart.
     var badge: String?
+    /// Launcher: the badge is the account's picture, as the browser saved it,
+    /// rather than the profile's initial on its colour. A profile without a
+    /// picture — one on a built-in avatar — still shows its initial.
+    var showsProfilePicture: Bool = false
     /// Agents: a card per session, one tile with a count that opens into the list, or the icon and count alone.
     var agentsLayout: AgentsLayout = .each
     /// Accessories: how each battery is drawn, which accessories are left out, and
@@ -368,7 +372,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case id, kind, anchor, path, apps, stack, agentsLayout, showsControls, usageLayout, usageServices
         case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
-        case arguments, browserProfile, label, iconPath, badge
+        case arguments, browserProfile, label, iconPath, badge, showsProfilePicture
     }
 
     /// Keys earlier versions wrote and this one only reads.
@@ -391,6 +395,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         label = try container.decodeIfPresent(String.self, forKey: .label)
         iconPath = try container.decodeIfPresent(String.self, forKey: .iconPath)
         badge = try container.decodeIfPresent(String.self, forKey: .badge)
+        showsProfilePicture = try container.decodeIfPresent(Bool.self, forKey: .showsProfilePicture) ?? false
         // A layout this build does not know — from a newer one — falls back to the
         // default rather than making the whole file unreadable. Before there were
         // three, `stacked` chose between the first two.
@@ -431,6 +436,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         try container.encodeIfPresent(label, forKey: .label)
         try container.encodeIfPresent(iconPath, forKey: .iconPath)
         try container.encodeIfPresent(badge, forKey: .badge)
+        try container.encode(showsProfilePicture, forKey: .showsProfilePicture)
     }
 }
 
@@ -667,6 +673,10 @@ struct CustomDockOptions: Codable, Hashable {
     /// Tiles grow under the pointer, as the Dock's do.
     var magnification: Bool = false
     var magnifiedSize: Double = 84
+    /// The longest the slab may be along its edge, in points, set by dragging the
+    /// grip at its end. Nil for as long as the screen has room for. Past the limit
+    /// the tiles page, with arrows at the end to move through them.
+    var maxLength: Double? = nil
     /// Apps that are running but not pinned, after the pinned ones — as the Dock does.
     var showsRunningApps: Bool = false
     /// The Dock's notification badges on the app tiles. Read from the Dock through
@@ -684,9 +694,13 @@ struct CustomDockOptions: Codable, Hashable {
     }
 
     /// Where the dock sits on `screen`: its own position when it has one and the
-    /// dock is on every display, otherwise the shared one.
+    /// dock is on every display, otherwise the shared one. A position of its own
+    /// is about keeping clear of the other displays, so it only counts while
+    /// there is more than one — alone, the display takes the shared position the
+    /// editor shows, and its own comes back with the next display plugged in.
     func placement(for screen: NSScreen) -> DockPlacement {
-        guard displays == .all, let key = screen.persistentID, let own = displayPlacements[key] else {
+        guard displays == .all, NSScreen.screens.count > 1,
+              let key = screen.persistentID, let own = displayPlacements[key] else {
             return placement
         }
         return own
@@ -813,7 +827,7 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, showsRunningApps, showsBadges, look, widgets
+        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, maxLength, showsRunningApps, showsBadges, look, widgets
     }
 
     init(from decoder: Decoder) throws {
@@ -830,6 +844,7 @@ extension CustomDockOptions {
         tileSize = try container.decodeIfPresent(Double.self, forKey: .tileSize) ?? defaults.tileSize
         magnification = try container.decodeIfPresent(Bool.self, forKey: .magnification) ?? defaults.magnification
         magnifiedSize = try container.decodeIfPresent(Double.self, forKey: .magnifiedSize) ?? defaults.magnifiedSize
+        maxLength = try container.decodeIfPresent(Double.self, forKey: .maxLength)
         showsRunningApps = try container.decodeIfPresent(Bool.self, forKey: .showsRunningApps) ?? defaults.showsRunningApps
         showsBadges = try container.decodeIfPresent(Bool.self, forKey: .showsBadges) ?? defaults.showsBadges
         look = try container.decodeIfPresent(DockLook.self, forKey: .look) ?? defaults.look

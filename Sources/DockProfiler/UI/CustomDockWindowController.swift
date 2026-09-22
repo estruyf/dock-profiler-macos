@@ -71,6 +71,7 @@ private struct DockPanelContent: View {
             .environment(\.dockWidgetsAction, openWidgets)
             .environment(\.dockWidgetUpdate, CustomDockWindowController.update)
             .environment(\.dockStackMoveOut, CustomDockWindowController.moveOut)
+            .environment(\.dockLayoutChanged, CustomDockWindowController.relayout)
     }
 }
 
@@ -253,6 +254,13 @@ final class CustomDockWindowController {
         for dock in docks { dock.reposition() }
     }
 
+    /// The dock has changed length of its own accord — capped at the screen, or
+    /// its grip dragged. The view lays out on the next pass; the panels are
+    /// fitted after it.
+    fileprivate static func relayout() {
+        Task { @MainActor in shared.reposition() }
+    }
+
     // MARK: - Appearance
 
     private func updateAppearance() {
@@ -284,6 +292,15 @@ final class CustomDockWindowController {
         } else {
             profile.customDock.widgets = row.compactMap(\.widget)
         }
+        store.update(profile)
+    }
+
+    /// The grip at the end of the dock was dragged: the slab may be this long, or
+    /// with nil, as long as the screen allows.
+    fileprivate static func resize(to length: CGFloat?) {
+        let store = ProfileStore.shared
+        guard var profile = store.activeProfile else { return }
+        profile.customDock.maxLength = length.map(Double.init)
         store.update(profile)
     }
 
@@ -494,11 +511,15 @@ private final class DockScreenPanel {
                 showsRunningApps: options.mode == .combined && options.showsRunningApps,
                 showsBadges: options.mode == .combined && options.showsBadges,
                 edge: edge,
+                alignment: placement.alignment,
                 tileSize: options.tileSize,
                 magnificationExtra: options.magnificationExtra,
                 look: options.look,
                 tint: content.color.color,
-                onReorder: CustomDockWindowController.reorder
+                screenLength: screenLength,
+                maxLength: options.maxLength.map { CGFloat($0) },
+                onReorder: CustomDockWindowController.reorder,
+                onResize: CustomDockWindowController.resize
             ),
             placement: placement,
             magnificationExtra: options.magnificationExtra,
@@ -558,6 +579,17 @@ private final class DockScreenPanel {
 
     // MARK: - Frames
 
+    /// The gap between the slab and the edges of the screen.
+    private static let margin: CGFloat = 8
+
+    /// The most room the screen has for the slab along its edge: the visible frame
+    /// less the margins and the headroom magnified tiles push their neighbours into.
+    private var screenLength: CGFloat {
+        let visible = screen.visibleFrame
+        let along = options.magnificationExtra * 3
+        return (edge.isVertical ? visible.height : visible.width) - Self.margin * 2 - along
+    }
+
     /// Where the dock sits when it is on show: snug against its edge, on the side
     /// the profile asked for. `visibleFrame` already leaves out the macOS Dock.
     private func shownFrame() -> NSRect? {
@@ -566,7 +598,7 @@ private final class DockScreenPanel {
         guard size.width > 0, size.height > 0 else { return nil }
 
         let visible = screen.visibleFrame
-        let margin: CGFloat = 8
+        let margin = Self.margin
         var origin = NSPoint.zero
 
         switch edge {

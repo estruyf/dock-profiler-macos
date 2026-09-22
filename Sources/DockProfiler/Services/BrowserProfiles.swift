@@ -6,13 +6,22 @@ struct BrowserProfile: Identifiable {
     /// What the browser is told to open: Chromium's profile directory, Firefox's profile name.
     let id: String
     let name: String
-    /// A window of this profile is up right now. Chromium keeps the list; Firefox
-    /// does not say, so its profiles are never marked.
+    /// A window of this profile is up right now — see `BrowserProfiles.openProfiles`.
     let isOpen: Bool
-    /// The account's picture, or the initial on the profile's colour, at menu size.
-    let image: NSImage?
+    /// The account's picture where the browser saved it; nil for a profile on
+    /// one of the browser's built-in avatars, which live inside its resources.
+    let picture: NSImage?
     /// The profile's own colour, for a badge drawn in its place.
     let color: NSColor
+    /// The width the picture was read at, and the initial is drawn at.
+    let side: CGFloat
+
+    /// The profile's initial, in one letter, as the browsers draw a profile
+    /// without a picture.
+    var initial: String { String(name.prefix(1)).uppercased() }
+
+    /// The picture, or the initial on the profile's colour — what a menu shows.
+    var image: NSImage { picture ?? BrowserProfiles.monogram(initial, on: color, side: side) }
 }
 
 /// The profiles of the browsers on the dock, read from the files the browsers
@@ -56,18 +65,57 @@ enum BrowserProfiles {
         bundleIdentifier.map { families[$0] != nil } ?? false
     }
 
+    /// The bundle identifiers of every browser whose profiles can be read.
+    static var knownBrowsers: [String] { Array(families.keys) }
+
     /// The browser's profiles in the order its picker shows them, their pictures
     /// `side` points across; empty when the browser is not one that is known, or
     /// has not been run.
     static func profiles(of bundleIdentifier: String, side: CGFloat = menuSide) -> [BrowserProfile] {
+        let open = openProfiles(of: bundleIdentifier)
         switch families[bundleIdentifier] {
         case .chromium(let directory):
-            return chromiumProfiles(in: supportDirectory.appendingPathComponent(directory), running: isRunning(bundleIdentifier), side: side)
+            return chromiumProfiles(in: supportDirectory.appendingPathComponent(directory), open: open, side: side)
         case .firefox(let directory):
-            return firefoxProfiles(in: supportDirectory.appendingPathComponent(directory), side: side)
+            return firefoxProfiles(in: supportDirectory.appendingPathComponent(directory), open: open, side: side)
         case nil:
             return []
         }
+    }
+
+    /// The ids of the browser's profiles with a window up right now, read from
+    /// what the browser leaves on disk: Chromium's `last_active_profiles`, the
+    /// lock Firefox holds on a profile in use. Empty when the browser is not
+    /// running, or is not one that is known.
+    static func openProfiles(of bundleIdentifier: String) -> Set<String> {
+        guard isRunning(bundleIdentifier) else { return [] }
+        switch families[bundleIdentifier] {
+        case .chromium(let directory):
+            return chromiumOpenProfiles(in: supportDirectory.appendingPathComponent(directory))
+        case .firefox(let directory):
+            return Set(firefoxProfileDirectories(in: supportDirectory.appendingPathComponent(directory))
+                .filter { $0.path.map { firefoxProcess(locking: $0) != nil } ?? false }.map(\.name))
+        case nil:
+            return []
+        }
+    }
+
+    /// The folders that change when one of the browser's profiles opens or closes
+    /// a window: where Chromium rewrites `Local State`, the Firefox profile folders
+    /// where the lock comes and goes — and the Firefox folder itself, for a
+    /// profile made later. Only those that exist.
+    static func watchedDirectories(of bundleIdentifier: String) -> [URL] {
+        let directories: [URL]
+        switch families[bundleIdentifier] {
+        case .chromium(let directory):
+            directories = [supportDirectory.appendingPathComponent(directory)]
+        case .firefox(let directory):
+            let root = supportDirectory.appendingPathComponent(directory)
+            directories = [root] + firefoxProfileDirectories(in: root).compactMap(\.path)
+        case nil:
+            directories = []
+        }
+        return directories.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private static func isRunning(_ bundleIdentifier: String) -> Bool {
@@ -103,19 +151,60 @@ enum BrowserProfiles {
         }
     }
 
+    // MARK: - Windows
+
+    /// The profile's windows that are up, front to back, for a click on its tile
+    /// to bring forward rather than open another — as a Windows taskbar button
+    /// of the profile would. Chromium ends every window's title with the
+    /// profile's name once there is more than one — "… - Microsoft Edge - Work"
+    /// — and a Firefox profile opened on its own is a process of its own, the
+    /// one holding its lock. Empty without Accessibility, or when no window of
+    /// the profile is up.
+    @MainActor
+    static func windows(of profileID: String, of bundleIdentifier: String) -> [AppWindow] {
+        switch families[bundleIdentifier] {
+        case .chromium(let directory):
+            guard let cache = chromiumState(in: supportDirectory.appendingPathComponent(directory))?["info_cache"] as? [String: [String: Any]],
+                  let info = cache[profileID] else { return [] }
+            let windows = AppWindows.windows(of: NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier))
+            // The only profile is not named in the titles; every window is its.
+            guard cache.count > 1 else { return windows }
+            let name = chromiumName(info)
+            return windows.filter { window in
+                [" - ", " – ", " — "].contains { window.title.hasSuffix($0 + name) }
+            }
+        case .firefox(let directory):
+            guard let folder = firefoxProfileDirectories(in: supportDirectory.appendingPathComponent(directory))
+                    .first(where: { $0.name == profileID })?.path,
+                  let app = firefoxProcess(locking: folder) else { return [] }
+            return AppWindows.windows(of: [app])
+        case nil:
+            return []
+        }
+    }
+
     // MARK: - Chromium
 
-    /// `Local State` holds every profile under `profile.info_cache`, keyed by its
-    /// directory, with the picker's order in `profiles_order` and the ones with
-    /// windows up in `last_active_profiles` — which stays after the browser quits,
-    /// for it to restore, so it only counts while the browser runs.
-    private static func chromiumProfiles(in directory: URL, running: Bool, side: CGFloat) -> [BrowserProfile] {
+    /// The `profile` section of `Local State`, or nil when it cannot be read.
+    private static func chromiumState(in directory: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: directory.appendingPathComponent("Local State")),
-              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let profile = state["profile"] as? [String: Any],
+              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return state["profile"] as? [String: Any]
+    }
+
+    /// The profiles with windows up, from `last_active_profiles` — which stays
+    /// after the browser quits, for it to restore, so it only counts while the
+    /// browser runs; the caller checks that.
+    private static func chromiumOpenProfiles(in directory: URL) -> Set<String> {
+        Set(chromiumState(in: directory)?["last_active_profiles"] as? [String] ?? [])
+    }
+
+    /// `Local State` holds every profile under `profile.info_cache`, keyed by its
+    /// directory, with the picker's order in `profiles_order`.
+    private static func chromiumProfiles(in directory: URL, open: Set<String>, side: CGFloat) -> [BrowserProfile] {
+        guard let profile = chromiumState(in: directory),
               let cache = profile["info_cache"] as? [String: [String: Any]] else { return [] }
         let order = profile["profiles_order"] as? [String] ?? []
-        let open = running ? Set(profile["last_active_profiles"] as? [String] ?? []) : []
         // The picker's order first, then any it does not know, by name.
         let rest = cache.keys.filter { !order.contains($0) }
             .sorted { chromiumName(cache[$0]!).localizedCaseInsensitiveCompare(chromiumName(cache[$1]!)) == .orderedAscending }
@@ -126,8 +215,9 @@ enum BrowserProfiles {
                 id: key,
                 name: chromiumName(info),
                 isOpen: open.contains(key),
-                image: chromiumImage(for: info, in: directory.appendingPathComponent(key), color: color, side: side),
-                color: color
+                picture: chromiumPicture(for: info, in: directory.appendingPathComponent(key), side: side),
+                color: color,
+                side: side
             )
         }
     }
@@ -141,15 +231,16 @@ enum BrowserProfiles {
         return name.isEmpty ? (account.isEmpty ? "Profile" : account) : name
     }
 
-    /// The account's picture where the browser saved it, else the profile's
-    /// initial on its colour — the fallback the browsers draw themselves.
-    private static func chromiumImage(for info: [String: Any], in directory: URL, color: NSColor, side: CGFloat) -> NSImage? {
+    /// The account's picture where the browser saved it, in the profile's folder
+    /// under the name `Local State` gives — or the name each browser uses when
+    /// it does not say; nil when there is none.
+    private static func chromiumPicture(for info: [String: Any], in directory: URL, side: CGFloat) -> NSImage? {
         let names = [info["gaia_picture_file_name"] as? String, "Google Profile Picture.png", "Edge Profile Picture.png"]
-        for name in names.compactMap({ $0 }) {
+        for name in names.compactMap({ $0 }) where !name.isEmpty {
             let url = directory.appendingPathComponent(name)
             if let image = cachedPicture(at: url, side: side) { return image }
         }
-        return monogram(String(chromiumName(info).prefix(1)).uppercased(), on: color, side: side)
+        return nil
     }
 
     /// Chromium's SkColor: ARGB in a signed 32-bit integer.
@@ -167,22 +258,32 @@ enum BrowserProfiles {
 
     /// `profiles.ini` has a `[ProfileN]` section per profile with its `Name`.
     /// The order is the file's, which is the profile manager's.
-    private static func firefoxProfiles(in directory: URL, side: CGFloat) -> [BrowserProfile] {
+    private static func firefoxProfiles(in directory: URL, open: Set<String>, side: CGFloat) -> [BrowserProfile] {
+        firefoxProfileDirectories(in: directory).map { profile in
+            BrowserProfile(id: profile.name, name: profile.name, isOpen: open.contains(profile.name), picture: nil, color: .systemGray, side: side)
+        }
+    }
+
+    /// Each profile in `profiles.ini` with the folder its `Path` points at —
+    /// under the Firefox folder when `IsRelative=1`, else as written; nil for
+    /// one without.
+    private static func firefoxProfileDirectories(in directory: URL) -> [(name: String, path: URL?)] {
         guard let text = try? String(contentsOf: directory.appendingPathComponent("profiles.ini"), encoding: .utf8) else {
             return []
         }
-        var profiles: [BrowserProfile] = []
+        var profiles: [(name: String, path: URL?)] = []
         var inProfile = false
         var name: String?
+        var path: String?
+        var isRelative = true
         func flush() {
             if inProfile, let name, !name.isEmpty {
-                profiles.append(BrowserProfile(
-                    id: name, name: name, isOpen: false,
-                    image: monogram(String(name.prefix(1)).uppercased(), on: .systemGray, side: side),
-                    color: .systemGray
-                ))
+                let folder = path.flatMap { $0.isEmpty ? nil : (isRelative ? directory.appendingPathComponent($0) : URL(fileURLWithPath: $0)) }
+                profiles.append((name, folder))
             }
             name = nil
+            path = nil
+            isRelative = true
         }
         for line in text.components(separatedBy: .newlines) {
             let line = line.trimmingCharacters(in: .whitespaces)
@@ -191,10 +292,27 @@ enum BrowserProfiles {
                 inProfile = line.hasPrefix("[Profile")
             } else if inProfile, line.hasPrefix("Name=") {
                 name = String(line.dropFirst("Name=".count))
+            } else if inProfile, line.hasPrefix("Path=") {
+                path = String(line.dropFirst("Path=".count))
+            } else if inProfile, line.hasPrefix("IsRelative=") {
+                isRelative = line.dropFirst("IsRelative=".count) != "0"
             }
         }
         flush()
         return profiles
+    }
+
+    /// The Firefox using the profile: while one is, the profile folder holds a
+    /// `lock` symlink pointing at `<address>:+<pid>` — the `+` when the
+    /// `.parentlock` file is fcntl-locked too. One left by a crash points at a
+    /// process that is gone, or is no longer a Firefox, and does not count.
+    private static func firefoxProcess(locking profile: URL) -> NSRunningApplication? {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: profile.appendingPathComponent("lock").path),
+              let digits = target.split(whereSeparator: { !$0.isNumber }).last,
+              let pid = pid_t(digits),
+              let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return nil }
+        if case .firefox? = families[app.bundleIdentifier ?? ""] { return app }
+        return nil
     }
 
     // MARK: - Pictures

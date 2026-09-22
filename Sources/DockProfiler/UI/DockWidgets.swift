@@ -165,6 +165,7 @@ struct AppStackWidget: View {
     @Environment(\.dockWidgetUpdate) private var update
     @Environment(\.dockStackMoveOut) private var moveOut
     @ObservedObject private var running = RunningAppsMonitor.shared
+    @ObservedObject private var profiles = BrowserProfileMonitor.shared
 
     var body: some View {
         IconTile(action: open) {
@@ -195,17 +196,17 @@ struct AppStackWidget: View {
                 .foregroundStyle(DockPalette.onSlab.opacity(0.7))
         } else {
             let columns = shown.count == 1 ? 1 : 2
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: columns), spacing: 2) {
+            let spacing: CGFloat = 2
+            let side = (size * 0.8 - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+            LazyVGrid(columns: Array(repeating: GridItem(.fixed(side), spacing: spacing), count: columns), spacing: spacing) {
                 ForEach(shown) { entry in
-                    Group {
-                        if let icon = entry.icon(side: size / 2) {
-                            Image(nsImage: icon).resizable()
-                        } else {
-                            Image(systemName: "app.dashed")
-                                .foregroundStyle(DockPalette.onSlab.opacity(0.7))
-                        }
+                    if let image = entry.image {
+                        BadgedIcon(image: image, badge: entry.badge(side: side), side: side)
+                    } else {
+                        Image(systemName: "app.dashed")
+                            .foregroundStyle(DockPalette.onSlab.opacity(0.7))
+                            .frame(width: side, height: side)
                     }
-                    .aspectRatio(1, contentMode: .fit)
                 }
             }
         }
@@ -218,8 +219,8 @@ struct AppStackWidget: View {
                 id: entry.id.uuidString,
                 title: entry.title,
                 subtitle: entry.subtitle,
-                icon: entry.icon(side: 64).map { .image($0) } ?? .symbol("app.dashed", DockPalette.onSlab),
-                isCurrent: entry.bundleIdentifier.map { running.bundleIdentifiers.contains($0) } ?? false,
+                icon: entry.image.map { .image($0, badge: entry.badge(side: 44)) } ?? .symbol("app.dashed", DockPalette.onSlab),
+                isCurrent: entry.isRunning(among: running.bundleIdentifiers, profiles: profiles),
                 action: { entry.open() },
                 menu: menu(for: entry)
             )
@@ -274,12 +275,20 @@ struct AppStackWidget: View {
 }
 
 extension AppStackEntry {
-    /// The app's icon, or the launcher's as its tile draws it; nil when the app has gone.
-    func icon(side: CGFloat) -> NSImage? {
+    /// The app's icon, or the launcher's own — or its app's, to take the badge;
+    /// nil when the app has gone.
+    var image: NSImage? {
         switch self {
         case .app(let app): return app.icon
-        case .launcher(let launcher): return Launcher.icon(of: launcher, side: side)
+        case .launcher(let launcher): return Launcher.customIcon(of: launcher) ?? Launcher.appIcon(of: launcher)
         }
+    }
+
+    /// The launcher's badge for the corner of an icon drawn `side` wide; none for
+    /// an app, or a launcher with an icon of its own.
+    func badge(side: CGFloat) -> NSImage? {
+        guard case .launcher(let launcher) = self, Launcher.customIcon(of: launcher) == nil else { return nil }
+        return Launcher.badgeImage(of: launcher, side: BadgedIcon.badgeSide(for: side))
     }
 
     /// The app's path, or what the launcher opens it with.
@@ -297,6 +306,15 @@ extension AppStackEntry {
         }
     }
 
+    /// Whether the entry is marked as running: an app by its process, a launcher
+    /// by its profile where it has one.
+    @MainActor func isRunning(among running: Set<String>, profiles: BrowserProfileMonitor) -> Bool {
+        switch self {
+        case .app(let app): return app.bundleIdentifier.map { running.contains($0) } ?? false
+        case .launcher(let launcher): return profiles.isRunning(launcher, among: running)
+        }
+    }
+
     var isMissing: Bool {
         switch self {
         case .app(let app): return app.isMissing
@@ -304,7 +322,7 @@ extension AppStackEntry {
         }
     }
 
-    func open() {
+    @MainActor func open() {
         switch self {
         case .app(let app): app.open()
         case .launcher(let launcher): Launcher.open(launcher)
@@ -330,16 +348,20 @@ extension WidgetTile {
 /// editor on a folder — drawn as an app tile: its icon with the running dot under
 /// it, and the profile's picture badged on the corner so two tiles of the same
 /// browser are told apart. An icon of its own replaces the app's altogether.
+/// The dot goes by the profile where there is one, so each profile's tile shows
+/// its own state, as a Windows taskbar does.
 struct LauncherWidget: View {
     let tile: WidgetTile
 
     @Environment(\.dockTileSize) private var size
     @Environment(\.dockVertical) private var vertical
     @ObservedObject private var running = RunningAppsMonitor.shared
+    @ObservedObject private var profiles = BrowserProfileMonitor.shared
     @State private var hovering = false
 
-    private var bundleIdentifier: String? { tile.appURL.flatMap { Bundle(url: $0)?.bundleIdentifier } }
-    private var isRunning: Bool { bundleIdentifier.map { running.bundleIdentifiers.contains($0) } ?? false }
+    /// For a browser opened as one of its profiles, the dot is that profile's own:
+    /// lit while it has a window up, dark while only the others do.
+    private var isRunning: Bool { profiles.isRunning(tile, among: running.bundleIdentifiers) }
     private var isMissing: Bool { tile.path.map { !FileManager.default.fileExists(atPath: $0) } ?? false }
 
     var body: some View {
@@ -375,8 +397,8 @@ struct LauncherWidget: View {
         if let custom = Launcher.customIcon(of: tile) {
             Image(nsImage: custom).resizable().aspectRatio(contentMode: .fit)
         } else if let app = Launcher.appIcon(of: tile) {
-            Image(nsImage: app).resizable()
-                .overlay(alignment: .bottomTrailing) { profileBadge }
+            let side = size - 8
+            BadgedIcon(image: app, badge: Launcher.badgeImage(of: tile, side: BadgedIcon.badgeSide(for: side)), side: side)
         } else {
             RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
                 .fill(DockPalette.onSlab.opacity(0.12))
@@ -385,21 +407,6 @@ struct LauncherWidget: View {
                         .font(.system(size: size * 0.36))
                         .foregroundStyle(DockPalette.onSlab.opacity(0.7))
                 )
-        }
-    }
-
-    /// The profile's picture on the icon's corner, ringed in the slab's colour so
-    /// it stands off the icon, the way a Dock badge does.
-    @ViewBuilder
-    private var profileBadge: some View {
-        let side = (size - 8) * 0.42
-        if let image = Launcher.badgeImage(of: tile, side: side) {
-            Image(nsImage: image)
-                .resizable()
-                .frame(width: side, height: side)
-                .clipShape(Circle())
-                .overlay(Circle().strokeBorder(DockPalette.slab, lineWidth: max(1.5, side * 0.08)))
-                .offset(x: side * 0.12, y: side * 0.12)
         }
     }
 
@@ -412,6 +419,37 @@ struct LauncherWidget: View {
     private func open() {
         DockTooltipController.shared.cancel()
         Launcher.open(tile)
+    }
+}
+
+/// An icon with a launcher's badge on its corner — the profile's picture, or its
+/// letters — clipped to a disc and ringed so it stands off the icon, the way a
+/// Dock badge does. The ring is the slab's colour, for the dock and the panels
+/// drawn on it; the editor passes its own window's.
+struct BadgedIcon: View {
+    let image: NSImage
+    let badge: NSImage?
+    let side: CGFloat
+    var ring: Color = DockPalette.slab
+
+    /// The badge's width on an icon `side` wide.
+    static func badgeSide(for side: CGFloat) -> CGFloat { side * 0.42 }
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .frame(width: side, height: side)
+            .overlay(alignment: .bottomTrailing) {
+                if let badge {
+                    let badgeSide = Self.badgeSide(for: side)
+                    Image(nsImage: badge)
+                        .resizable()
+                        .frame(width: badgeSide, height: badgeSide)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(ring, lineWidth: max(1.5, badgeSide * 0.08)))
+                        .offset(x: badgeSide * 0.12, y: badgeSide * 0.12)
+                }
+            }
     }
 }
 

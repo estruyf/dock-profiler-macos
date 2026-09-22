@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-22
+
+### Added
+
+- **A launcher for a browser profile shows that profile's own running state.**
+  Windows gives each browser profile its own taskbar button; the macOS Dock
+  cannot, since it sees the browser as one app — but the custom dock can. Two
+  Edge launchers side by side no longer light up together: the running dot
+  under each is lit only while *that* profile has a window up, and a click on
+  a lit tile brings the profile's front window forward — back off the Dock if
+  they were all minimized — rather than opening another. The same tick and dot
+  in an App Stack. Which profiles are open is read from what the browser keeps
+  on disk — Chromium's `Local State`, which the browser writes a few seconds
+  after a window opens or closes; the lock Firefox holds on a profile in use —
+  and the dock watches those files, so the dot follows without a relaunch.
+  Firefox profiles now get their check mark in the tile's Profiles menu too.
+  The profile's windows are found through Accessibility, by the profile's name
+  at the end of their titles, or for Firefox as the windows of the process
+  holding the lock; without Accessibility the browser as a whole comes forward.
+- **A dock with more on it than fits pages instead of running off the screen.**
+  The custom dock used to grow with what was on it, past the edge of the
+  screen if it came to that, with no way to the tiles beyond. It now stops at
+  the screen's edge and pages: arrows at its end move through the rest, a page
+  at a time, aligned to the tiles so none is left cut in half; a scroll over
+  it does the same. A slim grip at the same end sets a limit of your own — drag
+  it along the edge and the dock stops there, paging past it; drag it out to
+  where everything fits again, or double-click it, and the limit is lifted.
+  **Maximum width** in the editor's Size section shows the limit, with a button
+  to lift it. The grip and the arrows sit at the end of the dock that is free
+  to move, so the grip stays under the pointer as it is dragged.
+- **Profile picture on a launcher, when asked for.** A launcher for a browser
+  profile is badged with the profile's initial on its colour; tick **Profile
+  picture** on its card for the account's picture instead, as the browser saved
+  it. A profile on one of the browser's built-in avatars has no picture to show
+  and keeps its initial; a badge of your own wins over both.
+
+### Changed
+
+- **A stack's grid is as square as its items make it** — two by two for four,
+  three by three for up to nine — rather than one long row.
+- A launcher's badge is drawn on its icon in the stack's row on the editor's
+  card, as it is on the dock.
+
+### Fixed
+
+- **A display's own position no longer sticks once it is the only display.**
+  With the dock on all displays, a position given to a display on its row —
+  say, the right edge, to keep clear of a display beside it — kept winning
+  after the other display was unplugged, when the editor hides those rows and
+  the edge and alignment above looked to be in charge. Alone, a display now
+  takes the position above; its own is remembered and comes back with the
+  next display plugged in.
+
 ## [1.9.0] - 2026-09-21
 
 ### Added

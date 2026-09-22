@@ -338,6 +338,19 @@ struct CustomDockOptionsView: View {
                     sizeSlider($options.magnifiedSize, in: 40...128)
                 }
             }
+            row(options.edge.isVertical ? "Maximum height" : "Maximum width") {
+                HStack(spacing: 10) {
+                    Text(options.maxLength.map { "\(Int($0)) pt" } ?? "As much as the screen has room for")
+                        .monospacedDigit()
+                    if options.maxLength != nil {
+                        Button("Use the Whole Screen") { options.maxLength = nil }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            indented {
+                caption("Drag the grip at the end of the dock to limit it. Past the limit — or the screen's edge — the tiles page, with arrows at the end of the dock to move through them.")
+            }
         }
     }
 
@@ -1182,8 +1195,8 @@ private struct WidgetSettingsCard<HeaderMenu: View>: View {
         let isLauncher = entry.launcher != nil
         let editing = editingEntry == entry.id
         return Group {
-            if let icon = entry.icon(side: 44) {
-                Image(nsImage: icon).resizable()
+            if let image = entry.image {
+                BadgedIcon(image: image, badge: entry.badge(side: 22), side: 22, ring: Color(nsColor: .windowBackgroundColor))
             } else {
                 Image(systemName: isLauncher ? "arrow.up.forward.app" : "app.dashed").foregroundStyle(.secondary)
             }
@@ -1227,8 +1240,8 @@ private struct WidgetSettingsCard<HeaderMenu: View>: View {
         if let draggingEntry, let entry = listedStack.first(where: { $0.id == draggingEntry }) {
             let out = entryOut
             Group {
-                if let icon = entry.icon(side: 44) {
-                    Image(nsImage: icon).resizable()
+                if let image = entry.image {
+                    BadgedIcon(image: image, badge: entry.badge(side: 22), side: 22, ring: Color(nsColor: .windowBackgroundColor))
                 } else {
                     Image(systemName: "app.dashed").foregroundStyle(.secondary)
                 }
@@ -1465,8 +1478,33 @@ private struct LauncherFields: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
+                    if tile.browserProfile != nil {
+                        GridRow {
+                            gridLabel("")
+                            HStack(spacing: 8) {
+                                Toggle("Profile picture", isOn: $tile.showsProfilePicture)
+                                    .controlSize(.small)
+                                    .disabled(tile.badge != nil)
+                                Text(profilePictureNote)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
             }
+    }
+
+    /// Whether the browser has a picture saved for the chosen profile — one on a
+    /// built-in avatar has none to show, and keeps its initial.
+    private var chosenProfileHasPicture: Bool {
+        browserProfiles.contains { $0.id == tile.browserProfile?.id && $0.picture != nil }
+    }
+
+    private var profilePictureNote: String {
+        if tile.badge != nil { return "the badge above takes its place" }
+        if !chosenProfileHasPicture { return "the browser has no picture saved for this profile, so its initial stays" }
+        return "the account's picture, in place of the initial"
     }
 
     /// Two characters at most; blank means the profile's own picture or initial.
@@ -1495,7 +1533,7 @@ private struct LauncherFields: View {
     /// The tile as the dock draws it, and a target: an image dropped here becomes
     /// the icon, an app dropped here lends its icon.
     private var iconWell: some View {
-        LauncherIconPreview(tile: tile)
+        LauncherIconPreview(tile: tile, side: 48)
             .frame(width: 48, height: 48)
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -1522,7 +1560,7 @@ private struct LauncherFields: View {
         if !browserProfiles.isEmpty { hint = "The profile fills in the browser's own switch; anything more goes in Arguments. " + hint }
         hint += " Quote an argument with spaces; ~/ is your home folder."
         if tile.browserProfile != nil, tile.iconPath == nil {
-            hint += " The profile's picture, or its initial, is badged on the icon; type a badge of your own to tell two alike apart."
+            hint += " The profile's initial — or its picture, when asked for — is badged on the icon; type a badge of your own to tell two alike apart."
         }
         return hint
     }
@@ -1576,22 +1614,18 @@ private struct LauncherFields: View {
 /// until an app is chosen.
 private struct LauncherIconPreview: View {
     let tile: WidgetTile
+    let side: CGFloat
 
     var body: some View {
         if let custom = Launcher.customIcon(of: tile) {
             Image(nsImage: custom).resizable().aspectRatio(contentMode: .fit)
         } else if let app = Launcher.appIcon(of: tile) {
-            Image(nsImage: app).resizable()
-                .overlay(alignment: .bottomTrailing) {
-                    if let image = Launcher.badgeImage(of: tile, side: 20) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .frame(width: 20, height: 20)
-                            .clipShape(Circle())
-                            .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
-                            .offset(x: 2, y: 2)
-                    }
-                }
+            BadgedIcon(
+                image: app,
+                badge: Launcher.badgeImage(of: tile, side: BadgedIcon.badgeSide(for: side)),
+                side: side,
+                ring: Color(nsColor: .windowBackgroundColor)
+            )
         } else {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(Color.primary.opacity(0.06))

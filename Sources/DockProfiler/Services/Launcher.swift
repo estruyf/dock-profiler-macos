@@ -21,8 +21,29 @@ enum Launcher {
     /// rather than starting a second copy. With arguments there has to be a new
     /// process, since a running app is never handed them; apps that keep to one
     /// instance — the browsers, VS Code — take it over and answer with a window.
+    ///
+    /// A browser profile that already has a window up comes forward instead, as
+    /// the profile's own taskbar button would bring it on Windows: its front
+    /// window is raised — back off the Dock when they are all minimized — and
+    /// no new one is opened.
+    @MainActor
     static func open(_ tile: WidgetTile) {
         guard let url = tile.appURL, FileManager.default.fileExists(atPath: url.path) else { return }
+        if let profile = tile.browserProfile, let identifier = Bundle(url: url)?.bundleIdentifier {
+            let windows = BrowserProfiles.windows(of: profile.id, of: identifier)
+            if let window = windows.first(where: { !$0.isMinimized }) ?? windows.first {
+                window.raise()
+                return
+            }
+            // Up, but its windows out of reach — without Accessibility, or a
+            // browser that names them some other way: the browser comes forward
+            // as a whole, which is still better than another window.
+            if BrowserProfileMonitor.shared.isOpen(profile.id, of: identifier),
+               let app = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first(where: { !$0.isTerminated }) {
+                AppWindows.activate(app)
+                return
+            }
+        }
         let arguments = arguments(of: tile)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.arguments = arguments
@@ -92,8 +113,9 @@ enum Launcher {
     }
 
     /// The badge on the app's icon: the tile's own letters, on the profile's colour
-    /// when it has one; else the profile's picture — the account's, or its initial
-    /// on its colour. Nil for a launcher with neither.
+    /// when it has one; else the profile's initial on its colour — or, when the
+    /// tile asks for it and the browser has one saved, the account's picture.
+    /// Nil for a launcher with neither letters nor a profile.
     static func badgeImage(of tile: WidgetTile, side: CGFloat) -> NSImage? {
         let profile = tile.browserProfile.flatMap { chosen in
             tile.appURL.flatMap { Bundle(url: $0)?.bundleIdentifier }
@@ -102,23 +124,9 @@ enum Launcher {
         if let badge = badgeText(of: tile) {
             return BrowserProfiles.monogram(badge, on: profile?.color ?? .systemGray, side: side)
         }
-        return profile?.image
-    }
-
-    /// The icon as the tile draws it, in one image for a stack or a menu: its own
-    /// icon, or the app's with the badge on its corner. Nil when the app has gone
-    /// and there is no icon of its own.
-    static func icon(of tile: WidgetTile, side: CGFloat) -> NSImage? {
-        if let custom = customIcon(of: tile) { return custom }
-        guard let app = appIcon(of: tile) else { return nil }
-        guard let badge = badgeImage(of: tile, side: side * 0.42) else { return app }
-        return NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
-            app.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
-            let badgeSide = side * 0.42
-            let badgeRect = NSRect(x: rect.maxX - badgeSide + badgeSide * 0.12, y: rect.minY - badgeSide * 0.12, width: badgeSide, height: badgeSide)
-            badge.draw(in: badgeRect, from: .zero, operation: .sourceOver, fraction: 1)
-            return true
-        }
+        guard let profile else { return nil }
+        if tile.showsProfilePicture, let picture = profile.picture { return picture }
+        return BrowserProfiles.monogram(profile.initial, on: profile.color, side: side)
     }
 
     /// The badge as typed, trimmed to its first two characters; nil when blank.

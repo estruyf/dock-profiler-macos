@@ -67,6 +67,15 @@ yourself.
 - A **size** slider (36–96 pt) scales icons, cards and type together.
 - **Magnification** grows the tiles under the pointer, pushing their neighbours aside,
   as the Dock does.
+- The dock never grows past the screen. A dock with more on it than fits stops at the
+  screen's edge and pages instead: arrows at its end move through the rest, a page at
+  a time, and a scroll of the wheel or trackpad over it does the same. A slim **grip**
+  at the same end sets a limit of your own — drag it along the edge and the dock stops
+  there, paging past it. Drag it out to where everything fits again, or double-click
+  it, and the limit is lifted; **Maximum width** in the Size section shows it, with a
+  button to lift it from there. The grip and the arrows sit at the end of the dock
+  that is free to move: the right end, or the left when the dock hugs the right edge
+  of the screen; the bottom end of a column.
 - A **look** picks the slab: following the system, as the Dock does; light or dark
   whatever the system appearance — tiles, tips and stacks follow the slab; on macOS
   Tahoe, **Liquid Glass**, refracting what is behind it; or **transparent**, no slab at
@@ -179,7 +188,7 @@ the widget menu and set it up on its card in the editor:
   Choosing one fills in the browser's switch for you — `--profile-directory=…` for
   Chrome and the Chromium family, `-P …` for Firefox and Zen, with `-no-remote` added
   while a Firefox is already running, as the Profiles menu does — and the profile's
-  picture is badged on the app's icon, so two Chromes are told apart at a glance.
+  initial is badged on the app's icon, so two Chromes are told apart at a glance.
 - **Arguments** — anything else, written as it would be typed after the app on a
   command line: `--incognito https://example.com`, `~/Projects/site --new-window`.
   Quote an argument with spaces; `~/` is your home folder.
@@ -187,8 +196,12 @@ the widget menu and set it up on its card in the editor:
 - **Icon** — any image, or another app to borrow the icon of: choose one, or drop it
   on the icon at the left of the card. **Use App's Icon** puts the app's own back.
 - **Badge** — a letter or two of your own on the icon's corner, in the profile's
-  colour, in place of its picture or initial — for two profiles whose names start
-  alike. Blank keeps the profile's own.
+  colour, in place of its initial — for two profiles whose names start alike. Blank
+  keeps the profile's own.
+- **Profile picture** — the account's picture on the corner instead of the initial,
+  as the browser saved it. A profile with no picture — one on a built-in avatar,
+  which lives inside the browser — keeps its initial; a badge of your own wins over
+  both.
 
 On the dock a launcher looks and behaves like an app tile: click to open, the running
 dot underneath, Open and Show in Finder on right-click, along with the app, the
@@ -197,6 +210,19 @@ is just an app tile with its own icon: it brings a running app forward rather th
 opening a second copy. With arguments there has to be a new process, since a running
 app is never handed them; apps that keep to one instance — the browsers, VS Code —
 take it over and answer with a window, and others open a second copy.
+
+A launcher for a browser profile is that profile's own tile, the way Windows gives
+each profile its own taskbar button — something the macOS Dock cannot do, since it
+sees the browser as one app. Its running dot is lit only while *that* profile has a
+window up, so two Edges side by side show which of them is open; and a click on a lit
+tile brings the profile's front window forward — back off the Dock if they were all
+minimized — rather than opening another. Which profiles are open is read from what
+the browser keeps on disk: Chromium's `Local State`, which the browser writes a few
+seconds after a window opens or closes, so the dot follows a little behind; the lock
+Firefox holds on a profile in use, at once. The profile's windows are found through
+Accessibility, by the profile's name at the end of their titles — Chromium puts it
+there once there is more than one profile — or, for Firefox, as the windows of the
+process holding the lock; without Accessibility the browser as a whole comes forward.
 
 Only the custom dock can do this: the macOS Dock launches apps as they are, so a
 launcher lives among the widgets, in a combined dock or a widgets-only strip.

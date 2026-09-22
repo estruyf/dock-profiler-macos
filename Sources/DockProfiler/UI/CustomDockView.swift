@@ -115,6 +115,18 @@ extension EnvironmentValues {
         get { self[DockStackTargetedKey.self] }
         set { self[DockStackTargetedKey.self] = newValue }
     }
+
+    /// The dock's length has changed by its own doing — capped, or the cap
+    /// dragged — so the panel around it needs fitting again. Nil in the editor's
+    /// preview, which lays out with its window.
+    var dockLayoutChanged: (() -> Void)? {
+        get { self[DockLayoutChangedKey.self] }
+        set { self[DockLayoutChangedKey.self] = newValue }
+    }
+}
+
+private struct DockLayoutChangedKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
 }
 
 private struct DockStackTargetedKey: EnvironmentKey {
@@ -211,7 +223,7 @@ private struct WidgetSettingsMenu: View {
                     Picker("Profile", selection: browserProfile(among: profiles)) {
                         Text("None").tag(String?.none)
                         ForEach(profiles) { profile in
-                            Label { Text(profile.name) } icon: { profile.image.map { Image(nsImage: $0) } }
+                            Label { Text(profile.name) } icon: { Image(nsImage: profile.image) }
                                 .tag(String?.some(profile.id))
                         }
                     }
@@ -409,15 +421,25 @@ struct CustomDockView: View {
     /// The Dock's notification badges on the app tiles, read while the dock is up.
     var showsBadges = false
     var edge: DockStripEdge = .bottom
+    /// Which end of its edge the dock hugs; the grip and the pager sit at the other.
+    var alignment: DockStripAlignment = .center
     var tileSize: CGFloat = 56
     /// How much a tile under the pointer grows, in points; zero for no magnification.
     var magnificationExtra: CGFloat = 0
     var look = DockLook()
     /// The profile's colour, washed over the slab when the look asks for it.
     var tint: Color? = nil
+    /// The most room the screen has for the slab along its edge, the headroom for
+    /// magnification left out. Nil in the editor's preview, which has no screen.
+    var screenLength: CGFloat? = nil
+    /// The length the profile caps the slab at, if any; see `CustomDockOptions.maxLength`.
+    var maxLength: CGFloat? = nil
     /// Called with the new order when an item is dragged to a new place, as the
     /// Dock's own tiles can be. Without it the items stay put.
     var onReorder: (([DockStripItem]) -> Void)? = nil
+    /// Called with the new cap when the grip at the end of the dock is dragged —
+    /// nil for none. Without it there is no grip.
+    var onResize: ((CGFloat?) -> Void)? = nil
 
     @ObservedObject private var running = RunningAppsMonitor.shared
     /// Where the pointer is over the dock, along its axis, in the dock's own space.
@@ -448,9 +470,23 @@ struct CustomDockView: View {
     /// The divider's slot, so a running app dropped before it is pinned.
     private static let dividerID = UUID()
 
+    // Overflow
+    /// The strip's length as laid out, magnified tiles and all.
+    @State private var measuredLength: CGFloat = 0
+    /// The strip is longer than the slab may be: it scrolls, with the pager at the end.
+    @State private var overflowing = false
+    /// How far the strip has scrolled, while it overflows.
+    @State private var scrollOffset: CGFloat = 0
+    /// The cap as the grip is dragged, ahead of the profile.
+    @State private var draftMax: CGFloat?
+    /// Where the pointer and the slab's length were when the grip was taken hold of.
+    @State private var gripStart: (mouse: CGFloat, length: CGFloat)?
+    @State private var gripHovered = false
+
     @Environment(\.colorScheme) private var systemColorScheme
     /// Set on the live dock only; the editor's preview has none.
     @Environment(\.dockSettingsAction) private var settingsAction
+    @Environment(\.dockLayoutChanged) private var relayout
     @ObservedObject private var accessibility = AccessibilityDisplay.shared
 
     private var vertical: Bool { edge.isVertical }
@@ -463,16 +499,83 @@ struct CustomDockView: View {
     private var centers: [UUID: CGFloat] { frames.mapValues { vertical ? $0.midY : $0.midX } }
 
     var body: some View {
-        let spacing = padding
-        let layout = vertical ? AnyLayout(VStackLayout(spacing: spacing)) : AnyLayout(HStackLayout(spacing: spacing))
-        layout {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: padding)) : AnyLayout(HStackLayout(spacing: padding))
+        // The reader is wrapped round the pager as well as the strip, so its
+        // buttons can scroll the strip.
+        ScrollViewReader { proxy in
+            layout {
+                if controlsAtStart {
+                    grip
+                    if overflowing { pager(proxy) }
+                }
+                if overflowing {
+                    ScrollView(vertical ? .vertical : .horizontal) {
+                        strip.background(GeometryReader { geometry in
+                            let frame = geometry.frame(in: .named("scroll"))
+                            Color.clear.preference(key: ScrollOffsetKey.self, value: CGFloat?.some(-(vertical ? frame.minY : frame.minX)))
+                        })
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(width: vertical ? nil : window, height: vertical ? window : nil)
+                    .coordinateSpace(name: "scroll")
+                } else {
+                    strip
+                }
+                if !controlsAtStart {
+                    if overflowing { pager(proxy) }
+                    grip
+                }
+            }
+        }
+        .padding(padding)
+        // Between the tiles and the plate: behind the tiles' own menus, in front
+        // of the material, which would otherwise take the click.
+        .modifier(SlabContextMenu())
+        .background(plate)
+        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        // A forced light or dark style colours the tiles and cards too, not just the
+        // slab. The panel sets the same appearance on its window; this covers the
+        // preview in the editor, whose window keeps the system's.
+        .environment(\.colorScheme, style.forcedColorScheme ?? systemColorScheme)
+        .environment(\.dockTileCards, look.drawsTileCards)
+        .environment(\.dockShowsBadges, showsBadges)
+        .modifier(BadgeSubscription(active: showsBadges))
+        // Over the whole slab, padding included, as the Dock magnifies; the pointer
+        // is placed against the strip's own frame, which scrolls.
+        .onContinuousHover(coordinateSpace: .global) { phase in
+            guard magnificationExtra > 0, dragging == nil, gripStart == nil else { return }
+            switch phase {
+            case .active(let point): pointer = vertical ? point.y - frameInHost.minY : point.x - frameInHost.minX
+            case .ended: pointer = nil
+            }
+        }
+        .onPreferenceChange(TileFrameKey.self) { frames = $0 }
+        .onPreferenceChange(HostFrameKey.self) { frameInHost = $0 }
+        .onPreferenceChange(StripLengthKey.self) { measuredLength = $0 }
+        .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 ?? 0 }
+        .onChange(of: items) { pendingOrder = nil }
+        .onChange(of: naturalLength) { updateOverflow() }
+        .onChange(of: cap) { updateOverflow() }
+        // Capped, the slab's length is the dock's own doing; the panel follows it.
+        .onChange(of: overflowing ? cap : nil) { relayout?() }
+        // The profile has taken the dragged cap; the draft has done its job.
+        .onChange(of: maxLength) { draftMax = nil }
+        .environment(\.dockTileSize, tileSize)
+        .environment(\.dockVertical, vertical)
+        .environment(\.dockEdge, edge)
+    }
+
+    /// The tiles and widgets in their row, the ghost of a held one over them.
+    private var strip: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: padding)) : AnyLayout(HStackLayout(spacing: padding))
+        return layout {
             ForEach(displayedItems) { item in
                 reorderable(item)
             }
             if showsRunningApps {
                 // A running app being dragged takes a slot in the row as well, but its
                 // view here must live on: the gesture is attached to it.
-                let unpinned = running.unpinnedTiles(excluding: items.compactMap(\.tile))
+                let unpinned = unpinned
                 if !unpinned.isEmpty {
                     divider.background(CenterReporter(id: Self.dividerID, vertical: vertical))
                     ForEach(unpinned) { tile in
@@ -487,37 +590,190 @@ struct CustomDockView: View {
                 }
             }
         }
-        .padding(padding)
-        // Between the tiles and the plate: behind the tiles' own menus, in front
-        // of the material, which would otherwise take the click.
-        .modifier(SlabContextMenu())
-        .background(plate)
-        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay(ghost)
-        // A forced light or dark style colours the tiles and cards too, not just the
-        // slab. The panel sets the same appearance on its window; this covers the
-        // preview in the editor, whose window keeps the system's.
-        .environment(\.colorScheme, style.forcedColorScheme ?? systemColorScheme)
-        .environment(\.dockTileCards, look.drawsTileCards)
-        .environment(\.dockShowsBadges, showsBadges)
-        .modifier(BadgeSubscription(active: showsBadges))
+        .background(GeometryReader { geometry in
+            Color.clear
+                .preference(key: HostFrameKey.self, value: geometry.frame(in: .global))
+                .preference(key: StripLengthKey.self, value: vertical ? geometry.size.height : geometry.size.width)
+        })
         .coordinateSpace(name: "dock")
-        .onContinuousHover(coordinateSpace: .named("dock")) { phase in
-            guard magnificationExtra > 0, dragging == nil else { return }
-            switch phase {
-            case .active(let point): pointer = vertical ? point.y : point.x
-            case .ended: pointer = nil
+    }
+
+    private var unpinned: [DockTile] {
+        showsRunningApps ? running.unpinnedTiles(excluding: items.compactMap(\.tile)) : []
+    }
+
+    // MARK: - Overflow
+
+    /// The grip and the pager sit at the end of the dock that is free to move: the
+    /// trailing end, or the leading one when the dock hugs the trailing end of its
+    /// edge. A column is centred, so its bottom end.
+    private var controlsAtStart: Bool { !vertical && alignment == .trailing }
+    private var hasGrip: Bool { onResize != nil }
+    /// The grip's slot along the dock; the line itself is thinner.
+    private var gripLength: CGFloat { hasGrip ? 10 : 0 }
+    private var pagerLength: CGFloat { DockPagerButton.length * 2 + 2 }
+
+    /// The strip's length at rest: what was measured, less the growth of any tiles
+    /// magnified at the moment, so a pointer on the dock does not change what fits.
+    private var naturalLength: CGFloat {
+        (measuredLength - magnificationGrowth).rounded()
+    }
+
+    /// How much longer the magnified tiles make the strip right now. Only app tiles
+    /// magnify, each padding its slot by its growth.
+    private var magnificationGrowth: CGFloat {
+        guard magnificationExtra > 0, let pointer else { return 0 }
+        let tiles = displayedItems.compactMap(\.tile) + unpinned + others
+        return tiles.reduce(0) { total, tile in
+            guard !tile.kind.isSpacer else { return total }
+            let scale = Magnify.scale(pointer: pointer, center: centers[tile.id], extra: magnificationExtra, size: tileSize)
+            return total + tileSize * (scale - 1)
+        }
+    }
+
+    /// The shortest the slab can be: room for a tile and a half beside the controls.
+    private var minLength: CGFloat {
+        padding * 2 + tileSize * 1.5 + padding + pagerLength + (hasGrip ? gripLength + padding : 0)
+    }
+
+    /// The longest the slab may be right now: the cap being dragged, else the
+    /// tighter of the profile's and the screen's. Nil for no limit.
+    private var cap: CGFloat? {
+        if let draftMax { return draftMax }
+        let limit = [maxLength, screenLength].compactMap { $0 }.min()
+        return limit.map { max($0, minLength) }
+    }
+
+    /// The slab's length while the strip fits: the strip with the padding and the
+    /// grip around it.
+    private var restLength: CGFloat {
+        naturalLength + padding * 2 + (hasGrip ? gripLength + padding : 0)
+    }
+
+    /// The strip's visible length while it overflows: the cap less everything else
+    /// on the slab.
+    private var window: CGFloat {
+        guard let cap else { return 0 }
+        return max(cap - padding * 2 - pagerLength - padding - (hasGrip ? gripLength + padding : 0), 1)
+    }
+
+    /// Whether the strip fits, with a little give so a tile magnified at the
+    /// boundary does not flip the pager on and off.
+    private func updateOverflow() {
+        guard let cap else { overflowing = false; return }
+        if overflowing {
+            if restLength <= cap - 4 { overflowing = false }
+        } else if restLength > cap + 0.5 {
+            overflowing = true
+        }
+    }
+
+    private var canPageBack: Bool { scrollOffset > 1 }
+    private var canPageForward: Bool { scrollOffset + window < measuredLength - 1 }
+
+    /// The arrows through the rest of the strip: a page at a time, aligned to the
+    /// tiles so none is left cut in half.
+    private func pager(_ proxy: ScrollViewProxy) -> some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 2))
+        return layout {
+            DockPagerButton(systemName: vertical ? "chevron.up" : "chevron.left", enabled: canPageBack) {
+                page(proxy, forward: false)
+            }
+            DockPagerButton(systemName: vertical ? "chevron.down" : "chevron.right", enabled: canPageForward) {
+                page(proxy, forward: true)
             }
         }
-        .onPreferenceChange(TileFrameKey.self) { frames = $0 }
-        .background(GeometryReader { geometry in
-            Color.clear.preference(key: HostFrameKey.self, value: geometry.frame(in: .global))
-        })
-        .onPreferenceChange(HostFrameKey.self) { frameInHost = $0 }
-        .onChange(of: items) { pendingOrder = nil }
-        .environment(\.dockTileSize, tileSize)
-        .environment(\.dockVertical, vertical)
-        .environment(\.dockEdge, edge)
+    }
+
+    private func page(_ proxy: ScrollViewProxy, forward: Bool) {
+        let start = scrollOffset
+        let end = start + window
+        // The divider has no id of its own to scroll to.
+        let slots = frames.filter { $0.key != Self.dividerID }.map { id, frame in
+            (id: id, from: vertical ? frame.minY : frame.minX, to: vertical ? frame.maxY : frame.maxX)
+        }
+        let target: UUID?
+        let anchor: UnitPoint
+        if forward {
+            // The first slot cut off at the far end comes to the near end.
+            target = slots.filter { $0.to > end + 1 }.min { $0.from < $1.from }?.id
+            anchor = vertical ? .top : .leading
+        } else {
+            // The first slot cut off at the near end goes to the far end.
+            target = slots.filter { $0.from < start - 1 }.max { $0.from < $1.from }?.id
+            anchor = vertical ? .bottom : .trailing
+        }
+        guard let target else { return }
+        DockTooltipController.shared.cancel()
+        withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(target, anchor: anchor) }
+    }
+
+    /// The grip at the end of the dock: a slim line, dragged along the edge to set
+    /// how long the slab may be. Dragged out to the strip's own length — or as far
+    /// as the screen goes — it lifts the limit; so does a double-click.
+    @ViewBuilder
+    private var grip: some View {
+        if hasGrip {
+            let active = gripHovered || gripStart != nil
+            Capsule(style: .continuous)
+                .fill(DockPalette.onSlab.opacity(active ? 0.55 : 0.22))
+                .frame(width: vertical ? tileSize * 0.5 : 3, height: vertical ? 3 : tileSize * 0.5)
+                .frame(width: vertical ? nil : gripLength, height: vertical ? gripLength : nil)
+                .contentShape(Rectangle())
+                .animation(.easeOut(duration: 0.15), value: active)
+                .onHover { hovering in
+                    gripHovered = hovering
+                    if hovering { (vertical ? NSCursor.resizeUpDown : NSCursor.resizeLeftRight).push() } else { NSCursor.pop() }
+                }
+                // The dock can go away under the pointer — a profile switch, say —
+                // and the arrow must not stay a resize cursor.
+                .onDisappear { if gripHovered { gripHovered = false; NSCursor.pop() } }
+                .dockTooltip(
+                    vertical ? "Dock height" : "Dock width",
+                    "Drag to limit it; double-click for all of it"
+                )
+                .onTapGesture(count: 2) { onResize?(nil) }
+                .gesture(gripGesture)
+        }
+    }
+
+    /// The drag is read from the screen rather than the window: the panel moves
+    /// under the pointer as the dock changes length.
+    private var gripGesture: some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { _ in
+                let mouse = NSEvent.mouseLocation
+                let along = vertical ? mouse.y : mouse.x
+                if gripStart == nil {
+                    gripStart = (mouse: along, length: overflowing ? (cap ?? restLength) : restLength)
+                    pointer = nil
+                    DockTooltipController.shared.cancel()
+                }
+                guard let gripStart else { return }
+                // Screen y runs up; the grip is at a column's bottom end.
+                let outward: CGFloat = vertical || controlsAtStart ? -1 : 1
+                let length = gripStart.length + (along - gripStart.mouse) * outward
+                draftMax = min(max(length, minLength), screenLength ?? .infinity)
+            }
+            .onEnded { _ in
+                guard let draft = draftMax else { gripStart = nil; return }
+                gripStart = nil
+                // Out to where the strip fits, or as far as the screen goes, is no limit at all.
+                let free = min(restLength, screenLength ?? .infinity)
+                let committed: CGFloat? = draft >= free - 0.5 ? nil : draft.rounded()
+                if committed == maxLength {
+                    draftMax = nil
+                } else {
+                    onResize?(committed)
+                    // The new cap arrives through the profile; if for any reason it
+                    // does not, the dock goes back to what it was given.
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 800_000_000)
+                        if gripStart == nil { draftMax = nil }
+                    }
+                }
+            }
     }
 
     /// The slab behind the tiles — nothing at all when the look is transparent.
@@ -819,6 +1075,33 @@ private struct SlabContextMenu: ViewModifier {
     }
 }
 
+/// One of the pager's arrows: quiet on the slab, brighter under the pointer,
+/// dimmed when there is nothing further that way.
+private struct DockPagerButton: View {
+    let systemName: String
+    let enabled: Bool
+    let action: () -> Void
+
+    @Environment(\.dockTileSize) private var tileSize
+    @State private var hovering = false
+
+    /// Each arrow's slot along the dock.
+    static let length: CGFloat = 18
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: max(9, tileSize * 0.2), weight: .semibold))
+                .foregroundStyle(DockPalette.onSlab.opacity(enabled ? (hovering ? 0.95 : 0.7) : 0.25))
+                .frame(width: Self.length, height: Self.length)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { hovering = $0 }
+    }
+}
+
 // MARK: - Magnification
 
 /// Reports where an item's slot is in the dock, for magnification and reordering.
@@ -833,9 +1116,30 @@ private struct CenterReporter: View {
     }
 }
 
+/// The strip's length along the dock, as laid out. The strip has siblings on the
+/// slab — the grip, the pager — that report nothing; they must not blank it out.
+private struct StripLengthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
+    }
+}
+
+/// How far the strip has scrolled, while it overflows. Nil until it reports.
+private struct ScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat? = nil
+    static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
+        if let next = nextValue() { value = next }
+    }
+}
+
 private struct HostFrameKey: PreferenceKey {
     static let defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
 }
 
 private struct TileFrameKey: PreferenceKey {
@@ -857,10 +1161,15 @@ private struct Magnify: ViewModifier {
     let edge: DockStripEdge
 
     /// Tiles this many widths away from the pointer are back at full size.
-    private let reach: CGFloat = 2.5
+    private static let reach: CGFloat = 2.5
 
     private var scale: CGFloat {
-        guard extra > 0, let pointer, let center = centers[id] else { return 1 }
+        Self.scale(pointer: pointer, center: centers[id], extra: extra, size: size)
+    }
+
+    /// How much a tile centred at `center` grows with the pointer at `pointer`.
+    static func scale(pointer: CGFloat?, center: CGFloat?, extra: CGFloat, size: CGFloat) -> CGFloat {
+        guard extra > 0, let pointer, let center else { return 1 }
         let distance = abs(pointer - center) / size
         guard distance < reach else { return 1 }
         let t = 1 - distance / reach

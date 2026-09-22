@@ -4,7 +4,8 @@ import SwiftUI
 /// One entry in an open stack: a file, an app, a session or a profile.
 struct DockStackItem: Identifiable {
     enum Icon {
-        case image(NSImage)
+        /// An app's icon, with a launcher's badge on its corner.
+        case image(NSImage, badge: NSImage? = nil)
         case symbol(String, Color)
         case dot(Color)
         /// A ring filled to the fraction, for what is left of an allowance.
@@ -270,7 +271,11 @@ struct DockStackView: View {
         .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
     }
 
-    private var columns: Int { min(gridColumns, max(1, content.items.count)) }
+    /// As square a grid as the items make — two by two for four, three by three
+    /// for up to nine — rather than one long row; past a few rows it scrolls.
+    private var columns: Int {
+        min(gridColumns, max(1, Int(Double(content.items.count).squareRoot().rounded(.up))))
+    }
 
     private var width: CGFloat {
         switch content.style {
@@ -526,10 +531,8 @@ struct DockStackView: View {
     @ViewBuilder
     private func icon(_ icon: DockStackItem.Icon, size: CGFloat) -> some View {
         switch icon {
-        case .image(let image):
-            Image(nsImage: image)
-                .resizable()
-                .frame(width: size, height: size)
+        case .image(let image, let badge):
+            BadgedIcon(image: image, badge: badge, side: size)
         case .symbol(let name, let color):
             RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .fill(color.opacity(0.18))

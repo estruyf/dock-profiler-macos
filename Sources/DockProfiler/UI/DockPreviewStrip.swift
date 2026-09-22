@@ -162,6 +162,15 @@ enum DockPalette {
         light: NSColor(calibratedWhite: 1.0, alpha: 0.5)
     )
 
+    /// The dimming layer under a slab that floats over other apps' windows rather
+    /// than the desktop — a tip or a stack. A blur takes its shade from whatever is
+    /// behind it, so over a white window it comes out near white while the text
+    /// stays light: this holds the slab near its own shade whatever is behind.
+    static let contentDim = dynamic(
+        dark: NSColor(calibratedWhite: 0.0, alpha: 0.62),
+        light: NSColor(calibratedWhite: 1.0, alpha: 0.62)
+    )
+
     static let rim = dynamic(
         dark: NSColor(calibratedWhite: 1.0, alpha: 0.16),
         light: NSColor(calibratedWhite: 0.0, alpha: 0.12)

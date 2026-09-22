@@ -266,7 +266,7 @@ struct DockStackView: View {
         }
         .foregroundStyle(DockPalette.onSlab)
         .frame(width: width)
-        .background(DockSlab(look: look, tint: tint, cornerRadius: 14))
+        .background(DockSlab(look: look, tint: tint, cornerRadius: 14, overContent: true))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
     }

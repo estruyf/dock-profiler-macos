@@ -115,6 +115,12 @@ extension EnvironmentValues {
         set { self[DockWidgetsActionKey.self] = newValue }
     }
 
+    /// Opens the widget gallery beside the dock; nil in the editor's preview.
+    var dockAddWidgetAction: (() -> Void)? {
+        get { self[DockAddWidgetActionKey.self] }
+        set { self[DockAddWidgetActionKey.self] = newValue }
+    }
+
     /// Takes an entry out of the stack with the id, to stand on its own beside it.
     var dockStackMoveOut: ((AppStackEntry, UUID) -> Void)? {
         get { self[DockStackMoveOutKey.self] }
@@ -154,6 +160,12 @@ private struct DockWidgetsActionKey: EnvironmentKey {
     static let defaultValue: (() -> Void)? = nil
 }
 
+/// Opens the widget gallery beside the dock. Set on the live dock; nil in the
+/// editor's preview, whose Widgets tab has its own way to add one.
+private struct DockAddWidgetActionKey: EnvironmentKey {
+    static let defaultValue: (() -> Void)? = nil
+}
+
 private struct DockStackMoveOutKey: EnvironmentKey {
     static let defaultValue: ((AppStackEntry, UUID) -> Void)? = nil
 }
@@ -185,16 +197,17 @@ private extension WidgetTile {
 // MARK: - Context menus
 
 /// A tile's context menu in the dock: Remove from Dock for one that is in the
-/// profile and, on the live dock, a way to the dock's settings, first, so they
-/// are found at once; then, under a divider, the tile's own items and, for a
-/// widget with settings, those, right there in the menu. A tile with nothing of
-/// its own still gets the first two, so a right-click anywhere on the dock finds
-/// them.
+/// profile and, on the live dock, the widget gallery and a way to the dock's
+/// settings, first, so they are found at once; then, under a divider, the tile's
+/// own items and, for a widget with settings, those, right there in the menu. A
+/// tile with nothing of its own still gets the first few, so a right-click
+/// anywhere on the dock finds them.
 private struct DockContextMenu<Items: View>: ViewModifier {
     let items: Items
 
     @Environment(\.dockSettingsAction) private var openSettings
     @Environment(\.dockWidgetsAction) private var openWidgets
+    @Environment(\.dockAddWidgetAction) private var addWidget
     @Environment(\.dockRemoveAction) private var remove
     @Environment(\.dockStacking) private var stacking
     @Environment(\.dockWidget) private var widget
@@ -221,10 +234,11 @@ private struct DockContextMenu<Items: View>: ViewModifier {
         Group {
             if let remove { Button("Remove from Dock", action: remove) }
             if let stacking { DockStackingMenu(stacking: stacking) }
+            if let addWidget { Button("Add Widget…", action: addWidget) }
             // A widget's menu leads to the Widgets tab, where its card is.
             if let openWidgets { Button("Widget Settings…", action: openWidgets) }
             else if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
-            if remove != nil || stacking != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
+            if remove != nil || stacking != nil || addWidget != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
             items
             if hasSettings, Items.self != EmptyView.self { Divider() }
             if hasSettings, let widget, let update {
@@ -1145,16 +1159,20 @@ struct CustomDockView: View {
     }
 }
 
-/// The slab's own context menu, for a right-click between the tiles: just the
-/// settings item, and only on the live dock. Behind the tiles, so theirs win.
+/// The slab's own context menu, for a right-click between the tiles: the widget
+/// gallery and the settings, and only on the live dock. Behind the tiles, so
+/// theirs win.
 private struct SlabContextMenu: ViewModifier {
     @Environment(\.dockSettingsAction) private var openSettings
+    @Environment(\.dockAddWidgetAction) private var addWidget
     @Environment(\.dockEdge) private var edge
 
     func body(content: Content) -> some View {
         if let openSettings {
+            let addWidget = addWidget
             content.background(DockMenuAnchor(edge: edge, atPointer: true) {
                 let menu = NSMenu()
+                if let addWidget { menu.addItem("Add Widget…") { addWidget() } }
                 menu.addItem("Custom Dock Settings…") { openSettings() }
                 return menu
             })
@@ -2012,6 +2030,10 @@ struct DockSlab: View {
     let look: DockLook
     let tint: Color?
     let cornerRadius: CGFloat
+    /// Set for a slab that floats over other apps' windows rather than the desktop:
+    /// a tip or a stack. Its shade is then held near the appearance's own, since a
+    /// blur would otherwise take the shade of the window behind it.
+    var overContent = false
 
     @ObservedObject private var accessibility = AccessibilityDisplay.shared
 
@@ -2035,6 +2057,13 @@ struct DockSlab: View {
             // Apple advises, so the tiles read over anything.
             if glass, !solid, !look.translucent {
                 shape.fill(DockPalette.glassDim)
+            }
+            // The dock sits on the desktop, but a tip or a stack opens over whatever
+            // window is there. Its text comes from the appearance while a blur comes
+            // from the window behind, so a light window would leave light text on a
+            // light slab. Dim it back towards its own shade.
+            if overContent, !solid {
+                shape.fill(DockPalette.contentDim)
             }
             if look.tinted, let tint {
                 shape.fill(tint.opacity(0.28))

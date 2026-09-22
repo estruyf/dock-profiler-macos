@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-22
+
+### Added
+
+- **A widget gallery that opens off the dock itself.** Adding a widget meant
+  opening the profile editor, finding the Widgets tab and picking a name out of a
+  menu — a list of words for things that are pictures. **Add Widget…** in the
+  dock's own right-click menu now opens a gallery beside the slab, above it,
+  below it or to its side, whichever edge the dock is on. Every widget is drawn
+  there exactly as the dock will draw it, at the dock's own tile size and on the
+  dock's own slab, so you see a clock before you have a clock. Clicking one adds
+  it to the active profile at once and the gallery stays up, with a tick on the
+  corner of the ones already in the dock; there is a search field for the long
+  list, and it goes away on **Done**, on Escape, or on a click anywhere else. A
+  launcher asks for its app on the way in, since it is nothing without one.
+
+### Fixed
+
+- **AirPods were missing from the accessories widget.** The widget read the
+  charge of an accessory in two ways: from the IORegistry, where an accessory
+  that reports to macOS through a HID device sits, and from the standard
+  Bluetooth battery service other makers offer. AirPods are in neither — they
+  have no HID device, and they speak Apple's own protocol rather than the
+  standard service — so the one accessory people most want a level for was the
+  one the widget never showed. It now also reads what macOS itself knows about
+  its connected Bluetooth accessories, which is where AirPods, their case and
+  the rest of Apple's wireless audio report their charge. No extra permission is
+  asked for it.
+
+- **Tooltips and stacks stayed readable over a light window.** The dock sits on
+  the desktop, but a tip or a stack opens over whatever window is there. Its blur
+  took the shade of that window, so over a white page it came out near white
+  while its text stayed light — the name on the tile was barely there. Both now
+  hold their own shade whatever is behind them.
+
 ## [1.11.0] - 2026-09-22
 
 ### Added

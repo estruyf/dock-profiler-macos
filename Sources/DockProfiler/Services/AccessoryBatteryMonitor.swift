@@ -56,6 +56,17 @@ struct AccessoryBattery: Identifiable, Equatable {
     var kind: Kind
     var parts: [Part]
     var isCharging = false
+    /// The Bluetooth address, lowercased and without its separators, for the one
+    /// accessory that two sources both know. Nil when a source cannot say.
+    var address: String?
+
+    /// The one spelling of an address: sources write it with dashes, with colons,
+    /// in either case.
+    static func normalized(address: String?) -> String? {
+        guard let address else { return nil }
+        let stripped = address.lowercased().filter { $0.isHexDigit }
+        return stripped.isEmpty ? nil : stripped
+    }
 
     /// The lowest level, being the one that runs out first.
     var level: Int { parts.map(\.level).min() ?? 0 }
@@ -77,13 +88,17 @@ struct AccessoryBattery: Identifiable, Equatable {
 }
 
 /// The batteries of the accessories connected to this Mac, for the accessories
-/// widget. Two sources: the IORegistry, where every accessory that reports its
-/// charge to macOS — Apple's — sits with `HasBattery` set, needing no permission;
-/// and the Bluetooth battery service that accessories from other makers offer,
-/// read over CoreBluetooth, for which macOS asks once whether the app may use
-/// Bluetooth. Accessories update their level rarely, so both are polled every
-/// half minute while a widget is on screen, and again when the Mac wakes; the
-/// Bluetooth ones also push a change as it happens.
+/// widget. Three sources, none of the first two enough on its own: the
+/// IORegistry, where an accessory that reports its charge to macOS through a HID
+/// device — a Magic Keyboard, a Magic Mouse — sits with `HasBattery` set; the
+/// Bluetooth profile macOS itself keeps, which is where AirPods and their case
+/// are, having no HID device and speaking Apple's own protocol rather than the
+/// standard battery service; and that standard service, read over CoreBluetooth
+/// from the accessories of other makers that offer it, for which macOS asks once
+/// whether the app may use Bluetooth. The first two need no permission at all.
+/// Accessories update their level rarely, so all three are polled every half
+/// minute while a widget is on screen, and again when the Mac wakes; the
+/// CoreBluetooth ones also push a change as it happens.
 @MainActor
 final class AccessoryBatteryMonitor: ObservableObject {
     static let shared = AccessoryBatteryMonitor()
@@ -93,7 +108,9 @@ final class AccessoryBatteryMonitor: ObservableObject {
     /// mouse from another maker is missing.
     @Published private(set) var bluetoothDenied = false
 
-    private var registryDevices: [AccessoryBattery] = []
+    /// What the two macOS-side sources report, merged: the registry's accessories
+    /// and the Bluetooth profile's.
+    private var polledDevices: [AccessoryBattery] = []
     private let bluetooth = BluetoothBatteryReader()
     private var poller: Task<Void, Never>?
     private var wakeToken: NSObjectProtocol?
@@ -132,7 +149,7 @@ final class AccessoryBatteryMonitor: ObservableObject {
         if let wakeToken { NSWorkspace.shared.notificationCenter.removeObserver(wakeToken) }
         wakeToken = nil
         bluetooth.stop()
-        registryDevices = []
+        polledDevices = []
         devices = []
     }
 
@@ -150,17 +167,29 @@ final class AccessoryBatteryMonitor: ObservableObject {
 
     private func poll() async {
         bluetooth.refresh()
-        // Walking the registry is a handful of Mach calls; off the main thread all the same.
-        registryDevices = await Task.detached(priority: .utility) { AccessoryBatteryReader.devices() }.value
+        // Walking the registry is a handful of Mach calls and reading the Bluetooth
+        // profile spawns a process; both belong off the main thread.
+        polledDevices = await Task.detached(priority: .utility) {
+            let registry = AccessoryBatteryReader.devices()
+            // The registry's entry wins where both sources know an accessory: its
+            // name comes from the HID device, which is the one the user sees.
+            let addresses = Set(registry.compactMap(\.address))
+            let names = Set(registry.map { $0.name.lowercased() })
+            let profiled = BluetoothProfileReader.devices().filter { device in
+                !names.contains(device.name.lowercased())
+                    && !(device.address.map(addresses.contains) ?? false)
+            }
+            return registry + profiled
+        }.value
         publish()
     }
 
-    /// The registry's devices, then the Bluetooth ones it does not already have —
-    /// an accessory can be reachable both ways, and the registry's name is the
-    /// one the user knows. A steady order, so the tiles do not shuffle as levels
+    /// What macOS reports, then the CoreBluetooth accessories it does not already
+    /// have — an accessory can be reachable both ways, and macOS's name is the one
+    /// the user knows. A steady order, so the tiles do not shuffle as levels
     /// change.
     private func publish() {
-        var merged = registryDevices
+        var merged = polledDevices
         let known = Set(merged.map { $0.name.lowercased() })
         merged += bluetooth.devices.filter { !known.contains($0.name.lowercased()) }
         merged.sort { ($0.name, $0.id) < ($1.name, $1.id) }
@@ -327,10 +356,11 @@ private enum AccessoryBatteryReader {
                 ?? inferredName(from: properties)
             let id = identifier(location: location, properties: properties, name: name)
             guard seen.insert(id).inserted else { continue }
+            let address = AccessoryBattery.normalized(address: nonEmpty(properties["DeviceAddress"]))
             if !parts.isEmpty {
                 devices.append(AccessoryBattery(
                     id: id, name: name, kind: kind(for: name, properties: properties), parts: parts,
-                    isCharging: isCharging(properties, suffixes: ["", "Left", "Right"])
+                    isCharging: isCharging(properties, suffixes: ["", "Left", "Right"]), address: address
                 ))
             }
             // The case is a battery of its own, shown beside the earbuds as macOS does.
@@ -338,7 +368,7 @@ private enum AccessoryBatteryReader {
                 devices.append(AccessoryBattery(
                     id: "\(id)-case", name: "\(name) Case", kind: .chargingCase,
                     parts: [AccessoryBattery.Part(label: nil, level: caseLevel)],
-                    isCharging: isCharging(properties, suffixes: ["Case"])
+                    isCharging: isCharging(properties, suffixes: ["Case"]), address: address
                 ))
             }
         }
@@ -422,5 +452,101 @@ private enum AccessoryBatteryReader {
     private static func nonEmpty(_ value: Any?) -> String? {
         guard let string = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty else { return nil }
         return string
+    }
+}
+
+/// Asks macOS what its connected Bluetooth accessories report, through
+/// `system_profiler`. AirPods and their case are here and nowhere else: they
+/// speak Apple's own protocol rather than the standard battery service, and,
+/// having no HID device, never reach the IORegistry. The call takes about a
+/// tenth of a second and needs no permission of any kind — macOS has already
+/// asked the accessory, and this only reads the answer.
+private enum BluetoothProfileReader {
+    static func devices() -> [AccessoryBattery] {
+        guard let output = profile(),
+              let root = try? JSONSerialization.jsonObject(with: output) as? [String: Any],
+              let sections = root["SPBluetoothDataType"] as? [[String: Any]] else { return [] }
+
+        var devices: [AccessoryBattery] = []
+        var seen: Set<String> = []
+        // Each connected accessory is a dictionary of one: its name, then its properties.
+        for entry in sections.compactMap({ $0["device_connected"] as? [[String: Any]] }).joined() {
+            for (name, value) in entry {
+                guard let properties = value as? [String: Any] else { continue }
+                let parts = batteryParts(in: properties)
+                let caseLevel = level(properties["device_batteryLevelCase"])
+                guard !parts.isEmpty || caseLevel != nil else { continue }
+
+                let address = AccessoryBattery.normalized(address: properties["device_address"] as? String)
+                let id = address.map { "address-\($0)" } ?? "name-\(name)"
+                guard seen.insert(id).inserted else { continue }
+                let kind = kind(name: name, minorType: properties["device_minorType"] as? String)
+                if !parts.isEmpty {
+                    devices.append(AccessoryBattery(id: id, name: name, kind: kind, parts: parts, address: address))
+                }
+                // The case is a battery of its own, shown beside the earbuds as macOS does.
+                if let caseLevel {
+                    devices.append(AccessoryBattery(
+                        id: "\(id)-case", name: "\(name) Case", kind: .chargingCase,
+                        parts: [AccessoryBattery.Part(label: nil, level: caseLevel)], address: address
+                    ))
+                }
+            }
+        }
+        return devices
+    }
+
+    private static func profile() -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+        process.arguments = ["-json", "SPBluetoothDataType"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        // Drained before waiting, so a report larger than the pipe cannot deadlock.
+        let data = try? pipe.fileHandleForReading.readToEnd()
+        process.waitUntilExit()
+        return data
+    }
+
+    /// Earbuds report a level per side, everything else a single one — under a
+    /// key whose name has changed across macOS releases, so all of them are tried.
+    private static func batteryParts(in properties: [String: Any]) -> [AccessoryBattery.Part] {
+        var parts: [AccessoryBattery.Part] = []
+        let singleKeys = ["device_batteryLevel", "device_batteryLevelMain", "device_batteryLevelSingle"]
+        if let single = singleKeys.lazy.compactMap({ level(properties[$0]) }).first {
+            parts.append(AccessoryBattery.Part(label: nil, level: single))
+        }
+        for (key, label) in [("device_batteryLevelLeft", "Left"), ("device_batteryLevelRight", "Right")] {
+            if let level = level(properties[key]) {
+                parts.append(AccessoryBattery.Part(label: label, level: level))
+            }
+        }
+        return parts
+    }
+
+    /// Levels come through as "75%", and as a plain number on older releases.
+    private static func level(_ value: Any?) -> Int? {
+        let percent: Int?
+        switch value {
+        case let number as NSNumber: percent = number.intValue
+        case let string as String: percent = Int(string.filter(\.isNumber))
+        default: percent = nil
+        }
+        return percent.map { min(100, max(0, $0)) }
+    }
+
+    /// The name says what an accessory is where it can; `device_minorType` covers
+    /// the ones named after nothing in particular.
+    private static func kind(name: String, minorType: String?) -> AccessoryBattery.Kind {
+        let inferred = AccessoryBattery.Kind.inferred(from: name)
+        if inferred != .other { return inferred }
+        let type = (minorType ?? "").lowercased()
+        if type.contains("keyboard") { return .keyboard }
+        if type.contains("trackpad") { return .trackpad }
+        if type.contains("mouse") { return .mouse }
+        if type.contains("headphone") || type.contains("headset") || type.contains("audio") { return .headphones }
+        return .other
     }
 }

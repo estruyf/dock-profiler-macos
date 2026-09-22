@@ -39,6 +39,7 @@ private struct DockPanelContent: View {
     let magnificationExtra: CGFloat
     var openSettings: (() -> Void)? = nil
     var openWidgets: (() -> Void)? = nil
+    var openGallery: (() -> Void)? = nil
 
     var body: some View {
         let extra = magnificationExtra
@@ -69,6 +70,7 @@ private struct DockPanelContent: View {
             .padding(insets)
             .environment(\.dockSettingsAction, openSettings)
             .environment(\.dockWidgetsAction, openWidgets)
+            .environment(\.dockAddWidgetAction, openGallery)
             .environment(\.dockWidgetUpdate, CustomDockWindowController.update)
             .environment(\.dockStackMoveOut, CustomDockWindowController.moveOut)
             .environment(\.dockLayoutChanged, CustomDockWindowController.relayout)
@@ -524,7 +526,8 @@ private final class DockScreenPanel {
             placement: placement,
             magnificationExtra: options.magnificationExtra,
             openSettings: content.profileID.map { id in { CustomDockWindowController.openSettings(of: id) } },
-            openWidgets: content.profileID.map { id in { CustomDockWindowController.openWidgets(of: id) } }
+            openWidgets: content.profileID.map { id in { CustomDockWindowController.openWidgets(of: id) } },
+            openGallery: { [weak self] in self?.openGallery() }
         )
 
         if options.autohide {
@@ -542,6 +545,18 @@ private final class DockScreenPanel {
         }
         updateAppearance()
         updateHint()
+    }
+
+    /// Opens the widget gallery off this dock: it needs the slab it sits beside,
+    /// the screen to stay on, and the look to be drawn in.
+    private func openGallery() {
+        DockWidgetGalleryController.shared.toggle(
+            near: slabFrame,
+            on: screen,
+            edge: edge,
+            style: DockWidgetGalleryStyle(look: options.look, tint: content.color.color, tileSize: options.tileSize),
+            appearance: forcedAppearance
+        )
     }
 
     /// Takes the dock off its display: the profile no longer wants one there, or
@@ -659,8 +674,8 @@ private final class DockScreenPanel {
             // Leave a little room around the dock before it slips away again — and
             // stay while a stack is open from it, since the pointer is up in that
             // panel, or while a tile is being dragged, possibly off the dock.
-            let stackOpen = DockStackController.shared.isOpen && screen.frame.contains(mouse)
-            if shown.insetBy(dx: -24, dy: -24).contains(mouse) || stackOpen || DockDrag.inProgress {
+            let openOffDock = DockStackController.shared.isOpen || DockWidgetGalleryController.shared.isOpen
+            if shown.insetBy(dx: -24, dy: -24).contains(mouse) || (openOffDock && screen.frame.contains(mouse)) || DockDrag.inProgress {
                 hideTask?.cancel()
                 hideTask = nil
             } else if hideTask == nil {
@@ -723,6 +738,7 @@ private final class DockScreenPanel {
         revealed = false
         DockTooltipController.shared.cancel()
         DockStackController.shared.dismiss()
+        DockWidgetGalleryController.shared.dismiss()
         let panel = panel
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.18

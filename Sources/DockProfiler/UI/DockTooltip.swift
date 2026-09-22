@@ -137,7 +137,7 @@ struct DockTooltipView: View {
         .fixedSize()
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(DockSlab(look: look, tint: tint, cornerRadius: 8))
+        .background(DockSlab(look: look, tint: tint, cornerRadius: 8, overContent: true))
         .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
     }
 

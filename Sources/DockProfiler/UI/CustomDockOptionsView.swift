@@ -412,8 +412,8 @@ struct CustomDockOptionsView: View {
 
     private func addWidgetMenu(_ title: String) -> some View {
         Menu(title) {
-            ForEach(Self.widgetGroups, id: \.self) { group in
-                ForEach(group) { kind in
+            ForEach(WidgetGroup.all) { group in
+                ForEach(group.kinds) { kind in
                     Button {
                         let widget = WidgetTile(kind: kind)
                         options.widgets.append(widget)
@@ -426,7 +426,7 @@ struct CustomDockOptionsView: View {
                         }
                     }
                 }
-                if group != Self.widgetGroups.last { Divider() }
+                if group.id != WidgetGroup.all.last?.id { Divider() }
             }
         }
         .fixedSize()
@@ -657,13 +657,6 @@ struct CustomDockOptionsView: View {
                 .foregroundStyle(Color.primary.opacity(0.15))
         )
     }
-
-    /// Glanceable things first, then the ones that open into something.
-    private static let widgetGroups: [[WidgetKind]] = [
-        [.clock, .date, .battery, .accessories, .nowPlaying],
-        [.trash, .airDrop, .folderStack, .appStack, .launcher],
-        [.profiles, .agents, .aiUsage],
-    ]
 
     /// A binding to one widget by id, so a card's settings write straight back to the profile.
     private func binding(for id: UUID) -> Binding<WidgetTile> {

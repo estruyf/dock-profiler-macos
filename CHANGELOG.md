@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-09-22
+
+### Fixed
+
+- **The Keychain dialog stops turning up on its own.** The AI Usage widget read
+  Claude Code's token from the Keychain on every refresh, and macOS's "wants to
+  use your confidential information" dialog kept coming back every few hours
+  however often **Always Allow** was clicked: Claude Code rewrites its
+  `Claude Code-credentials` item whenever it rotates its token, and the rewritten
+  item no longer lists Dock Profiler among the apps allowed to read it. The
+  widget now holds the token it read until the token itself expires, so the
+  Keychain is touched once a rotation instead of once every five minutes, and a
+  refresh on the timer reads with macOS's interaction turned off — where it used
+  to raise the dialog it now reports **Keychain access needed** and leaves the
+  last numbers on the card. Clicking that line, or **Refresh** in the tile's
+  menu, is what brings the dialog up, so it appears only when you asked for it.
+
 ## [1.13.0] - 2026-09-22
 
 ### Added

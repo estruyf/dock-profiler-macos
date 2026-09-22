@@ -22,7 +22,7 @@ until access is granted.
 | Automation → Music / Spotify | Now Playing's first read and its play, pause and skip; track changes themselves arrive over notifications that need nothing | Once, when the widget first asks the player |
 | Automation → Finder | Empty Trash from the Trash widget | Once, the first time you empty it |
 | Files and Folders | The Trash widget counting what is in the Trash; the Folder widget reading a protected folder such as Downloads | Once per folder |
-| Keychain | The AI Usage widget reading Claude Code's token from the `Claude Code-credentials` item | Once, with Always Allow |
+| Keychain | The AI Usage widget reading Claude Code's token from the `Claude Code-credentials` item | Only when you ask the card to refresh; a refresh on the timer never brings the dialog up |
 | Bluetooth | The Accessories widget reading the charge of accessories from other makers — a Logitech mouse, headphones — over the Bluetooth battery service. Apple's accessories need nothing | Once, when an Accessories widget first appears |
 | Accessibility | Notification badges on a combined dock's app tiles, read from the macOS Dock's own tiles; the open windows of an app in its tile's menu, read from the app itself | When **Show notification badges on app tiles** is switched on, or from **Show Windows Here…** in a tile's menu, or from the welcome screen; macOS shows its dialog once, after that it is granted under Privacy & Security → Accessibility |
 | Login item | Launch at login | The toggle on the welcome screen or in Settings (`SMAppService`) |
@@ -32,10 +32,15 @@ until access is granted.
 There is nothing to sign in to: the widget reads the sign-in each service's own tools
 leave on your Mac, and sends that token only to that service's own usage endpoint.
 
-- **Claude** — reading the Keychain item brings up macOS's Keychain dialog the first
-  time; **Always Allow** settles it. The token is only read,
-  never refreshed. If it has expired, the card says so; run `claude` once and the card
-  picks up the new sign-in by itself within half a minute.
+- **Claude** — reading the Keychain item brings up macOS's Keychain dialog, and
+  **Always Allow** settles it until Claude Code rotates its token: rewriting the item
+  drops the app from the item's access list, and the next read would ask again. So the
+  widget asks as little as it can. The token is kept until it expires, which leaves the
+  Keychain alone between rotations, and a refresh on the timer reads without the dialog:
+  when macOS would ask, the card says **Keychain access needed**, keeps the last numbers
+  on screen, and brings the dialog up only when you click that line or **Refresh**. The
+  token is only read, never refreshed. If it has expired, the card says so; run `claude`
+  once and the card picks up the new sign-in by itself within half a minute.
 - **Copilot** — sign in to Copilot in VS Code or Xcode and the card fills in. Nothing
   else to do.
 

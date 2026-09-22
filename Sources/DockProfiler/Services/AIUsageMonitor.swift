@@ -36,7 +36,8 @@ struct UsageReport: Equatable {
 enum UsageProblem: Equatable {
     /// No token on this Mac: the service's own tool has not been signed in to.
     case signedOut
-    /// The Keychain item is there but macOS would not hand it over.
+    /// The Keychain item is there but macOS would not hand it over without asking,
+    /// and a background refresh does not ask.
     case keychainDenied
     /// The token was refused: it has expired, or lacks the scope the usage call needs.
     case unauthorized
@@ -54,7 +55,7 @@ enum UsageProblem: Equatable {
     var title: String {
         switch self {
         case .signedOut: return "Not signed in"
-        case .keychainDenied: return "Keychain access denied"
+        case .keychainDenied: return "Keychain access needed"
         case .unauthorized: return "Sign-in expired"
         case .failed: return "Couldn't refresh"
         }
@@ -63,7 +64,7 @@ enum UsageProblem: Equatable {
     func hint(for service: UsageService) -> String {
         switch self {
         case .signedOut: return service.signInHint
-        case .keychainDenied: return "Allow Dock Profiler to read the Claude Code-credentials item when macOS asks"
+        case .keychainDenied: return "Click here, then choose Always Allow when macOS asks for the Claude Code-credentials item"
         case .unauthorized:
             switch service {
             case .claude: return "Run Claude Code once so it refreshes its sign-in"
@@ -147,9 +148,13 @@ final class AIUsageMonitor: ObservableObject {
     // MARK: Refreshing
 
     /// Fetches every service, or just the one. A fetch already under way is left to finish.
-    func refresh(_ only: UsageService? = nil) {
+    ///
+    /// `interactive` marks a refresh the user asked for: only those may put macOS's
+    /// Keychain dialog on screen. The timer's refreshes read what they can get without
+    /// interrupting and report `keychainDenied` when that is not enough.
+    func refresh(_ only: UsageService? = nil, interactive: Bool = false) {
         let services = only.map { [$0] } ?? UsageService.allCases
-        for service in services { fetch(service, unlessRefused: false) }
+        for service in services { fetch(service, unlessRefused: false, interactive: interactive) }
     }
 
     /// Looks again at the services waiting on a new sign-in, asking the API only
@@ -157,7 +162,7 @@ final class AIUsageMonitor: ObservableObject {
     private func retry() {
         let waiting = UsageService.allCases.filter { problems[$0]?.awaitsSignIn == true }
         guard !waiting.isEmpty else { return stopRetrying() }
-        for service in waiting { fetch(service, unlessRefused: true) }
+        for service in waiting { fetch(service, unlessRefused: true, interactive: false) }
     }
 
     private func startRetrying() {
@@ -172,12 +177,12 @@ final class AIUsageMonitor: ObservableObject {
         retryTimer = nil
     }
 
-    private func fetch(_ service: UsageService, unlessRefused: Bool) {
+    private func fetch(_ service: UsageService, unlessRefused: Bool, interactive: Bool) {
         guard tasks[service] == nil else { return }
         refreshing.insert(service)
         let refused = unlessRefused ? refused[service] : nil
         tasks[service] = Task { [weak self] in
-            let outcome = await Self.fetch(service, unless: refused)
+            let outcome = await Self.fetch(service, unless: refused, interactive: interactive)
             guard !Task.isCancelled else { return }
             self?.finish(service, with: outcome)
         }
@@ -202,6 +207,9 @@ final class AIUsageMonitor: ObservableObject {
             // Only a token the server turned down is worth remembering: one that
             // expired on this Mac never went out, and re-reading it costs nothing.
             refused[service] = problem == .unauthorized ? token : nil
+            // A token the server turned down must not be served from the cache again,
+            // or the sign-in that replaces it would never be picked up.
+            if problem == .unauthorized, service == .claude { ClaudeUsageSource.forgetToken() }
             if problem.awaitsSignIn { startRetrying() }
         }
     }
@@ -227,12 +235,12 @@ final class AIUsageMonitor: ObservableObject {
     }
 
     /// Off the main actor: reading the Keychain can block on a permission dialog.
-    private nonisolated static func fetch(_ service: UsageService, unless refused: String?) async -> Outcome {
+    private nonisolated static func fetch(_ service: UsageService, unless refused: String?, interactive: Bool) async -> Outcome {
         var token: String?
         do {
             let current: String
             switch service {
-            case .claude: current = try ClaudeUsageSource.token()
+            case .claude: current = try ClaudeUsageSource.token(interactive: interactive)
             case .copilot: current = try CopilotUsageSource.token()
             }
             if current == refused { return .stillRefused }
@@ -341,20 +349,78 @@ enum ClaudeUsageSource {
 
     // MARK: Credentials
 
-    static func token() throws -> String {
-        if let token = try keychainToken() { return token }
-        if let token = fileToken() { return token }
+    /// The token last read, held until it expires: Claude Code rotates it every few
+    /// hours and rewrites its Keychain item, which drops the permission this app was
+    /// granted, so each read is a dialog waiting to happen. Between rotations the
+    /// cached token answers every refresh and the Keychain is left alone.
+    private static let cache = TokenCache()
+
+    static func token(interactive: Bool) throws -> String {
+        if let token = cache.current() { return token }
+        do {
+            if let credentials = try keychainCredentials(interactive: interactive) {
+                cache.store(credentials)
+                return credentials.token
+            }
+        } catch {
+            // A Keychain that will not hand the token over is not the last word: older
+            // sign-ins, and Linux, leave the credentials in a file instead.
+            if let credentials = fileCredentials() {
+                cache.store(credentials)
+                return credentials.token
+            }
+            throw error
+        }
+        if let credentials = fileCredentials() {
+            cache.store(credentials)
+            return credentials.token
+        }
         throw UsageError.signedOut
     }
 
-    /// The Keychain item belongs to Claude Code, so the first read brings up macOS's
-    /// "wants to use your confidential information" dialog; "Always Allow" settles it.
+    /// Drops the cached token, for when the server has turned it down.
+    static func forgetToken() {
+        cache.store(nil)
+    }
+
+    struct Credentials {
+        var token: String
+        var expiresAt: Date?
+    }
+
+    private final class TokenCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var credentials: Credentials?
+
+        /// A token in its last minute counts as gone, so a refresh does not go out
+        /// with one the server is about to refuse.
+        func current() -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let credentials else { return nil }
+            if let expiry = credentials.expiresAt, expiry.timeIntervalSinceNow < 60 { return nil }
+            return credentials.token
+        }
+
+        func store(_ credentials: Credentials?) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.credentials = credentials
+        }
+    }
+
+    /// The Keychain item belongs to Claude Code, so a read brings up macOS's "wants to
+    /// use your confidential information" dialog unless this app is on the item's list;
+    /// "Always Allow" puts it there, until Claude Code rewrites the item on its next
+    /// token rotation and the list goes back to holding only Claude Code. A background
+    /// refresh therefore reads without interaction and reports `keychainDenied` rather
+    /// than interrupting; the dialog is only ever raised by a refresh the user asked for.
     ///
     /// There can be more than one item under the name — an older sign-in, or one
     /// holding only MCP server logins, left beside the current one — so every match
     /// is read, newest first, and the first with a live token wins. Asking for a
     /// single match could hand back the stale one and call a signed-in Mac signed out.
-    private static func keychainToken() throws -> String? {
+    private static func keychainCredentials(interactive: Bool) throws -> Credentials? {
         // The secrets cannot come back for several items at once, so the items are
         // listed first — attributes and a reference each — and read one by one.
         let query: [String: Any] = [
@@ -388,21 +454,40 @@ enum ClaudeUsageSource {
                 kSecMatchItemList as String: [reference],
                 kSecReturnData as String: true,
             ]
+            // Only the read of the secret itself can bring up the dialog; listing the
+            // items above never does.
             var data: CFTypeRef?
-            let status = SecItemCopyMatching(read as CFDictionary, &data)
+            let status = withInteraction(interactive) { SecItemCopyMatching(read as CFDictionary, &data) }
             guard status == errSecSuccess else {
                 if status == errSecItemNotFound { continue }
                 throw failure(status)
             }
             guard let data = data as? Data else { continue }
             do {
-                if let token = try token(in: data) { return token }
+                if let credentials = try credentials(in: data) { return credentials }
             } catch {
                 expired = error
             }
         }
         if let expired { throw expired }
         return nil
+    }
+
+    /// Whether the dialog for a login-keychain item's access list may appear is this
+    /// per-process flag, which `kSecUseAuthenticationUI` does not cover and nothing
+    /// has replaced. It applies to the whole process, so reads are serialised around it
+    /// and it is put back the moment the read is done.
+    private static let interactionLock = NSLock()
+
+    @available(macOS, deprecated: 10.10, message: "SecKeychainSetUserInteractionAllowed has no replacement for login-keychain prompts")
+    private static func withInteraction(_ allowed: Bool, _ read: () -> OSStatus) -> OSStatus {
+        interactionLock.lock()
+        SecKeychainSetUserInteractionAllowed(allowed)
+        defer {
+            SecKeychainSetUserInteractionAllowed(true)
+            interactionLock.unlock()
+        }
+        return read()
     }
 
     private static func failure(_ status: OSStatus) -> Error {
@@ -414,22 +499,24 @@ enum ClaudeUsageSource {
         }
     }
 
-    private static func fileToken() -> String? {
+    private static func fileCredentials() -> Credentials? {
         let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json")
         guard let data = try? Data(contentsOf: file) else { return nil }
-        return try? token(in: data)
+        return (try? credentials(in: data)) ?? nil
     }
 
     /// `{"claudeAiOauth": {"accessToken": "sk-ant-oat…", "expiresAt": <ms>, …}}`.
     /// An item that holds only MCP server logins is as good as signed out.
-    private static func token(in data: Data) throws -> String? {
+    private static func credentials(in data: Data) throws -> Credentials? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String, !token.isEmpty else { return nil }
-        if let expires = UsageHTTP.number(oauth["expiresAt"]), expires / 1000 < Date().timeIntervalSince1970 {
-            throw UsageError.unauthorized
+        guard let expires = UsageHTTP.number(oauth["expiresAt"]) else {
+            return Credentials(token: token, expiresAt: nil)
         }
-        return token
+        let expiresAt = Date(timeIntervalSince1970: expires / 1000)
+        if expiresAt < Date() { throw UsageError.unauthorized }
+        return Credentials(token: token, expiresAt: expiresAt)
     }
 }
 

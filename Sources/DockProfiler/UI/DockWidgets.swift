@@ -1305,7 +1305,7 @@ private struct UsageServiceCard: View {
         }
         .dockTooltip(tooltipTitle, tooltipDetail)
         .dockContextMenu {
-            Button("Refresh") { monitor.refresh(service) }
+            Button("Refresh") { monitor.refresh(service, interactive: true) }
                 .disabled(monitor.refreshing.contains(service))
             Button("Open \(service.title) Usage Page") { NSWorkspace.shared.open(service.usagePage) }
         }
@@ -1456,7 +1456,7 @@ private struct UsageServiceCard: View {
                 title: problem.title,
                 subtitle: problem.hint(for: service),
                 icon: .symbol("exclamationmark.triangle", .orange),
-                action: { AIUsageMonitor.shared.refresh(service) }
+                action: { AIUsageMonitor.shared.refresh(service, interactive: true) }
             ))
         }
         var title = service.title
@@ -1473,7 +1473,7 @@ private struct UsageServiceCard: View {
                     id: "refresh",
                     title: "Refresh",
                     icon: .symbol("arrow.clockwise", DockPalette.onSlab),
-                    action: { AIUsageMonitor.shared.refresh(service) }
+                    action: { AIUsageMonitor.shared.refresh(service, interactive: true) }
                 )
             ),
             edge: edge

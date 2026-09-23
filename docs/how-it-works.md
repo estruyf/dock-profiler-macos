@@ -113,7 +113,7 @@ position until it is given one.
 | Folder | The folder's contents, newest first |
 | Agents | The session files [Agent Frame](https://github.com/estruyf/vscode-agent-frame)'s hooks keep in `~/.agent-frame/sessions`. The hook records the agent's process; walking up from it reaches the app hosting the session — VS Code, Insiders, Cursor — so the folder is opened with that app |
 | AI Usage — Claude | Claude Code's OAuth token from the `Claude Code-credentials` Keychain items (newest first, the first with a live token wins) or `~/.claude/.credentials.json`, sent to Anthropic's OAuth usage endpoint. The token is only read, never refreshed — refreshing it from outside would sign Claude Code out — and it is held until it expires, so the Keychain is read once a rotation rather than once a refresh. A refresh on the timer reads with macOS's interaction turned off, so the Keychain dialog can only ever follow a refresh you asked for |
-| AI Usage — Copilot | The GitHub token the Copilot extensions for VS Code and Xcode keep in `~/.config/github-copilot/apps.json`, sent to the same endpoint those editors ask (`copilot_internal/user`) |
+| AI Usage — Copilot | A GitHub token — the one Copilot for Xcode keeps in `~/.config/github-copilot/apps.json`, else `GH_TOKEN`/`GITHUB_TOKEN`, else `gh auth token` — sent to the same endpoint the editors ask (`copilot_internal/user`) |
 
 The AI Usage numbers refresh every five minutes while the widget is on screen, and when
 the Mac wakes.

@@ -41,7 +41,8 @@ leave on your Mac, and sends that token only to that service's own usage endpoin
   on screen, and brings the dialog up only when you click that line or **Refresh**. The
   token is only read, never refreshed. If it has expired, the card says so; run `claude`
   once and the card picks up the new sign-in by itself within half a minute.
-- **Copilot** — sign in to Copilot in VS Code or Xcode and the card fills in. Nothing
-  else to do.
+- **Copilot** — sign in to the GitHub CLI (`gh auth login`), or to Copilot for Xcode,
+  and the card fills in. VS Code's own Copilot sign-in is kept where other apps cannot
+  read it, so on a Mac with only VS Code, `gh` is the way in.
 
 Where each widget gets its data is spelled out in [How it works](./how-it-works.md).

@@ -284,6 +284,6 @@ are. Click a card for every window with its reset time and countdown — Claude'
 per-model weekly limits included — and refresh or jump to the service's usage page from
 the context menu.
 
-There is nothing to sign in to: the widget reads the sign-in Claude Code and the
-Copilot editor extensions already leave on your Mac. What it reads, and the one
+There is nothing to sign in to: the widget reads the sign-in Claude Code, the GitHub
+CLI and Copilot for Xcode already leave on your Mac. What it reads, and the one
 Keychain prompt you will see, are in [Permissions](./permissions.md#the-ai-usage-widget).

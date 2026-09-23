@@ -68,7 +68,7 @@ enum UsageProblem: Equatable {
         case .unauthorized:
             switch service {
             case .claude: return "Run Claude Code once so it refreshes its sign-in"
-            case .copilot: return "Sign in to GitHub Copilot again in VS Code or Xcode"
+            case .copilot: return "Run gh auth login, or sign in to GitHub Copilot again in Xcode"
             }
         case .failed(let message): return message
         }
@@ -86,7 +86,7 @@ enum UsageError: Error {
 
 /// What is left of the Claude and GitHub Copilot allowances, read the way each
 /// service's own tools leave their sign-in on this Mac: Claude Code's OAuth token in
-/// the Keychain, Copilot's in `~/.config/github-copilot`. Refreshed every few
+/// the Keychain, Copilot's in `~/.config/github-copilot` or the GitHub CLI. Refreshed every few
 /// minutes while a widget is on screen, and on demand.
 @MainActor
 final class AIUsageMonitor: ObservableObject {
@@ -522,8 +522,10 @@ enum ClaudeUsageSource {
 
 // MARK: - Copilot
 
-/// The Copilot extensions for VS Code and Xcode keep their GitHub OAuth token in
-/// `~/.config/github-copilot/apps.json` (`hosts.json` before that), and GitHub's
+/// Copilot for Xcode and the older editor plugins keep their GitHub OAuth token in
+/// `~/.config/github-copilot/apps.json` (`hosts.json` before that); VS Code keeps its
+/// own in its encrypted secret storage, out of reach, so the GitHub CLI's token is
+/// the fallback — the endpoint takes any token of an account with Copilot. GitHub's
 /// internal user endpoint — the one the editors ask for the same numbers — reports
 /// the premium-request, chat and completion quotas for the month.
 enum CopilotUsageSource {
@@ -579,9 +581,21 @@ enum CopilotUsageSource {
 
     // MARK: Credentials
 
+    /// The Copilot plugins' own token first, then `GH_TOKEN`/`GITHUB_TOKEN`, then the
+    /// GitHub CLI's.
+    static func token() throws -> String {
+        if let token = pluginToken() { return token }
+        let environment = ProcessInfo.processInfo.environment
+        for name in ["GH_TOKEN", "GITHUB_TOKEN"] {
+            if let token = environment[name], !token.isEmpty { return token }
+        }
+        if let token = ghToken() { return token }
+        throw UsageError.signedOut
+    }
+
     /// `{"github.com:Iv1.…": {"user": "…", "oauth_token": "gho_…"}}`; the key names
     /// the host and the OAuth app, and there is normally one entry.
-    static func token() throws -> String {
+    private static func pluginToken() -> String? {
         for name in ["apps.json", "hosts.json"] {
             let file = configDirectory.appendingPathComponent(name)
             guard let data = try? Data(contentsOf: file),
@@ -594,7 +608,38 @@ enum CopilotUsageSource {
                 }
             }
         }
-        throw UsageError.signedOut
+        return nil
+    }
+
+    /// Where Homebrew and the installer put `gh`; an app does not get the shell's PATH.
+    static let ghPaths = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+
+    /// `gh auth token`: gh reads its own Keychain item, so no Keychain prompt comes
+    /// to this app. Given a few seconds before it counts as signed out.
+    private static func ghToken() -> String? {
+        guard let path = ghPaths.first(where: FileManager.default.isExecutableFile(atPath:)) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = ["auth", "token", "--hostname", "github.com"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let deadline = Date().addingTimeInterval(5)
+        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if process.isRunning {
+            process.terminate()
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        let token = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
     }
 
     /// "2026-10-01": the quota starts over on that day.

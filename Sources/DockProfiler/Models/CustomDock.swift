@@ -111,7 +111,7 @@ enum UsageService: String, Codable, CaseIterable, Identifiable {
     var signInHint: String {
         switch self {
         case .claude: return "Sign in to Claude Code in a terminal; its token is read from the Keychain"
-        case .copilot: return "Sign in to GitHub Copilot in VS Code or Xcode; its token is read from ~/.config/github-copilot"
+        case .copilot: return "Run gh auth login in a terminal, or sign in to GitHub Copilot for Xcode"
         }
     }
 }

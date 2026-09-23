@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-09-23
+
+### Fixed
+
+- **The AI Usage widget's Copilot card said "Not signed in" on a Mac with only
+  VS Code.** It read the token from `~/.config/github-copilot`, which only
+  Copilot for Xcode and the older editor plugins write — VS Code keeps its
+  Copilot sign-in in its own encrypted storage. The card now falls back to
+  `GH_TOKEN`/`GITHUB_TOKEN` and then to the GitHub CLI's sign-in
+  (`gh auth token`), so `gh auth login` is all it takes. The sign-in hints say
+  so.
+
 ## [1.13.1] - 2026-09-22
 
 ### Fixed

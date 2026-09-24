@@ -38,24 +38,51 @@ enum AgentState: Int, Comparable {
     }
 }
 
-/// One Claude Code session Agent Frame knows about.
+/// One coding-agent session: either one Agent Frame's hooks are reporting, or one
+/// found running on this Mac.
 struct AgentSession: Identifiable, Hashable {
     var id: String
     var cwd: String
     var state: AgentState
-    /// The agent process, when the hook recorded it; lets a crashed session be told apart.
+    /// The agent process, when the hook recorded it or the session was found by
+    /// its process; lets a crashed session be told apart.
     var pid: pid_t?
     var updatedAt: Date
+    /// Which agent this is. Agent Frame reports Claude Code alone.
+    var tool: AgentTool = .claudeCode
+    /// The session was found by its process rather than reported by Agent Frame's
+    /// hooks, so it has no way of knowing when the agent is waiting for an answer.
+    var isDiscovered = false
+    /// Whether `state` is read from something, or is only the neutral default. A
+    /// tool that keeps no record this side can read says the session is there and
+    /// no more, and saying "Idle" for one hard at work would be worse than saying
+    /// nothing.
+    var stateIsKnown = true
 
     var folderName: String { (cwd as NSString).lastPathComponent }
+
+    /// What the session is doing, in a word — or just that it is running, for a
+    /// session whose state cannot be read.
+    var stateTitle: String { stateIsKnown ? state.title : "Running" }
+
+    /// What the tooltip says about where the session came from.
+    var sourceHint: String {
+        isDiscovered ? "\(tool.title), running here" : "\(tool.title), via Agent Frame"
+    }
 }
 
-/// Reads the session files Agent Frame's Claude Code hooks keep in
-/// `~/.agent-frame/sessions` — one JSON file per session, rewritten on every hook
-/// event — and publishes the live ones. Nothing is written back: the files belong
-/// to Agent Frame, which prunes them itself.
+/// Publishes the coding-agent sessions running on this Mac, from two sources.
 ///
+/// Agent Frame's Claude Code hooks keep a JSON file per session in
+/// `~/.agent-frame/sessions`, rewritten on every hook event; those files say
+/// exactly what a session is doing, waiting included. Nothing is written back:
+/// they belong to Agent Frame, which prunes them itself.
 /// See https://github.com/estruyf/vscode-agent-frame.
+///
+/// Without them — or for a session started outside an editor — the agents are
+/// found by their processes instead, so the widget has something to show with
+/// nothing installed. Those sessions are working or idle only: see
+/// `AgentProcesses` for what is read, and what cannot be known that way.
 @MainActor
 final class AgentSessionMonitor: ObservableObject {
     static let shared = AgentSessionMonitor()
@@ -74,6 +101,9 @@ final class AgentSessionMonitor: ObservableObject {
 
     /// Agent Frame treats sessions untouched for this long as crashed leftovers.
     private static let staleAfter: TimeInterval = 12 * 60 * 60
+    /// How often the sweep comes round: well inside `AgentProcesses.busyWithin`, so
+    /// a session that has stopped working is not still shown as busy.
+    private static let heartbeatInterval: TimeInterval = 4
 
     private var source: DispatchSourceFileSystemObject?
     private var fileDescriptor: CInt = -1
@@ -93,7 +123,10 @@ final class AgentSessionMonitor: ObservableObject {
         observeDirectory()
         // A session that dies without a SessionEnd never touches its file again, so
         // look for gone processes now and then even when nothing changes on disk.
-        heartbeat = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+        // Sessions found by their processes have nothing watching them at all, and
+        // their working-or-idle turns on the last few seconds, so the sweep has to
+        // come round often enough to catch it — it costs a few milliseconds.
+        heartbeat = Timer.scheduledTimer(withTimeInterval: Self.heartbeatInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.scan() }
         }
     }
@@ -146,6 +179,13 @@ final class AgentSessionMonitor: ObservableObject {
 
     // MARK: - Reading
 
+    /// Whether sessions found by their processes join the ones Agent Frame reports.
+    /// On unless a profile's widget turns it off; a session Agent Frame already has
+    /// is never listed twice.
+    var includesDiscovered = true {
+        didSet { if includesDiscovered != oldValue { scan() } }
+    }
+
     func scan() {
         let directory = Self.sessionsDirectory
         let files = (try? FileManager.default.contentsOfDirectory(
@@ -157,11 +197,39 @@ final class AgentSessionMonitor: ObservableObject {
             guard let session = Self.session(at: file) else { continue }
             found.append(session)
         }
+        if includesDiscovered {
+            // Agent Frame's word wins for a folder it is already reporting on: it
+            // knows about waiting, and the process would only say "working".
+            let reported = Set(found.map(\.cwd))
+            found += Self.discovered().filter { !reported.contains($0.cwd) }
+        }
         found.sort { lhs, rhs in
             if lhs.state != rhs.state { return lhs.state > rhs.state }
             return lhs.updatedAt > rhs.updatedAt
         }
         if found != sessions { sessions = found }
+    }
+
+    /// The agents running on this Mac that Agent Frame is not reporting: working
+    /// while the tool has written to its record of that folder a moment ago, idle
+    /// otherwise. Nothing here says whether an agent is waiting for an answer, so
+    /// none of these sessions is ever marked as waiting.
+    private static func discovered() -> [AgentSession] {
+        let now = Date()
+        return AgentProcesses.running().map { process in
+            let activity = AgentProcesses.lastActivity(of: process)
+            let busy = activity.map { now.timeIntervalSince($0) < AgentProcesses.busyWithin } ?? false
+            return AgentSession(
+                id: process.sessionID ?? "pid-\(process.pid)",
+                cwd: process.cwd,
+                state: busy ? .busy : .idle,
+                pid: process.pid,
+                updatedAt: activity ?? now,
+                tool: process.tool,
+                isDiscovered: true,
+                stateIsKnown: activity != nil
+            )
+        }
     }
 
     private static func session(at file: URL) -> AgentSession? {

@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-09-24
+
+### Added
+
+- **Dividers.** A widget that is a slim line, for splitting the custom dock into
+  groups — the same line the running-apps section is marked off with, now
+  something you can put anywhere. Add one from the gallery's Layout group or the
+  editor's Add widget menu, and drag it along the dock like any other tile. It
+  draws across the dock in a column and along it in a row.
+- **The pill.** A third way for the dock to come and go, beside always visible
+  and hiding until the pointer reaches its edge: the dock waits off screen
+  behind a small pill, and opens when the pointer reaches the pill itself rather
+  than anywhere along that edge, leaving the rest of the edge yours. In
+  Position → Showing.
+- **A dock joined to its edge.** The slab can run into the screen edge with its
+  corners there squared off, the way the menu bar meets the top of the screen,
+  rather than floating clear of it. In Position → Sits. Liquid Glass keeps its
+  rounded corners: it shapes itself from a radius alone.
+- **Cards that open on hover.** With *Open a widget's card when the pointer
+  rests on it* in Style, a widget's card — a stack's files, the agent sessions,
+  a service's usage — slides out on its own after a moment and goes away when
+  the pointer leaves it. A click still opens it at once, and pins it.
+- **Double-click a widget for its settings.** Any widget on the dock now goes
+  straight to its own card in the editor, opened and scrolled to. *Widget
+  Settings…* in the context menu does the same.
+- **Used, as well as left, on the AI Usage widget.** A *Show* picker on its card
+  and in its context menu switches the numbers, rings and bars between what is
+  left of an allowance and what has gone. The colour follows what is left either
+  way, so a ring going red still means running out.
+- **Agent sessions without Agent Frame.** The Agents widget now finds the Claude
+  Code and Codex sessions running on this Mac by their own processes, so it has
+  something to show with nothing installed. Those sessions are working or idle:
+  nothing outside an agent says when it is waiting for you, so Agent Frame's
+  hooks are still what report that, and its sessions are used wherever it has
+  them, and a Codex session — which keeps no per-folder record to read — is listed
+  as running rather than being called idle. Only process and file metadata is read — which processes are running,
+  the folder each is in, and when a transcript file was last written — never
+  what is inside a transcript. Turn it off with *Find the sessions running on
+  this Mac* on the widget's card.
+
 ## [1.13.3] - 2026-09-24
 
 ### Fixed

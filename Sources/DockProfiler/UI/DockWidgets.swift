@@ -8,6 +8,9 @@ import SwiftUI
 /// for Dock tiles, so they look like Dock tiles.
 private struct IconTile<Icon: View>: View {
     let action: () -> Void
+    /// For a widget that opens a card: the same card, for a profile that opens it
+    /// when the pointer rests on the tile rather than waiting for the click.
+    var hover: (() -> Void)? = nil
     @ViewBuilder let icon: () -> Icon
 
     @Environment(\.dockTileSize) private var size
@@ -24,6 +27,7 @@ private struct IconTile<Icon: View>: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .dockHoverCard { hover?() }
     }
 }
 
@@ -31,6 +35,9 @@ private struct IconTile<Icon: View>: View {
 /// tile in a column, like the agents' session chips.
 private struct CardButton<Content: View>: View {
     let action: () -> Void
+    /// For a widget that opens a card: the same card, for a profile that opens it
+    /// when the pointer rests on the widget rather than waiting for the click.
+    var hover: (() -> Void)? = nil
     /// A square tile whichever way the dock runs; nil follows the dock.
     var square: Bool? = nil
     @ViewBuilder let content: () -> Content
@@ -51,6 +58,7 @@ private struct CardButton<Content: View>: View {
                 .allowsHitTesting(false)
         )
         .onHover { hovering = $0 }
+        .dockHoverCard { hover?() }
     }
 }
 
@@ -85,7 +93,7 @@ struct FolderStackWidget: View {
     private var exists: Bool { tile.path.map { FileManager.default.fileExists(atPath: $0) } ?? false }
 
     var body: some View {
-        IconTile(action: open) {
+        IconTile(action: { open() }, hover: { open(hovering: true) }) {
             if let path = tile.path, exists {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable()
             } else {
@@ -106,10 +114,10 @@ struct FolderStackWidget: View {
         }
     }
 
-    private func open() {
+    private func open(hovering: Bool = false) {
         DockTooltipController.shared.cancel()
         guard let url, exists else { return }
-        DockStackController.shared.toggle(
+        DockStackController.shared.present(
             for: tile.id,
             content: DockStackContent(
                 title: tile.title,
@@ -123,7 +131,8 @@ struct FolderStackWidget: View {
                     action: { NSWorkspace.shared.open(url) }
                 )
             ),
-            edge: edge
+            edge: edge,
+            hovering: hovering
         )
     }
 
@@ -168,7 +177,7 @@ struct AppStackWidget: View {
     @ObservedObject private var profiles = BrowserProfileMonitor.shared
 
     var body: some View {
-        IconTile(action: open) {
+        IconTile(action: { open() }, hover: { open(hovering: true) }) {
             RoundedRectangle(cornerRadius: size * 0.2, style: .continuous)
                 .fill(DockPalette.onSlab.opacity(targeted ? 0.3 : 0.12))
                 .overlay(
@@ -212,7 +221,7 @@ struct AppStackWidget: View {
         }
     }
 
-    private func open() {
+    private func open(hovering: Bool = false) {
         DockTooltipController.shared.cancel()
         let items = tile.stack.map { entry in
             DockStackItem(
@@ -228,7 +237,7 @@ struct AppStackWidget: View {
         // On the live dock the stack's order and contents are its own to change;
         // in the editor's preview they are set on the card.
         let editable = update != nil
-        DockStackController.shared.toggle(
+        DockStackController.shared.present(
             for: tile.id,
             content: DockStackContent(
                 title: tile.stack.isEmpty ? "App Stack" : "\(tile.stack.count) apps",
@@ -242,7 +251,8 @@ struct AppStackWidget: View {
                     if let entry = tile.stack.first(where: { $0.id.uuidString == id }) { moveOut?(entry, tile.id) }
                 } : nil
             ),
-            edge: edge
+            edge: edge,
+            hovering: hovering
         )
     }
 
@@ -475,7 +485,7 @@ struct AgentsStackTile: View {
     private var compact: Bool { vertical || minimal }
 
     var body: some View {
-        CardButton(action: open, square: minimal ? true : nil) {
+        CardButton(action: { open() }, hover: { open(hovering: true) }, square: minimal ? true : nil) {
             let layout = compact ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
             layout {
                 BotGlyph()
@@ -504,7 +514,7 @@ struct AgentsStackTile: View {
 
     private var tooltipDetail: String {
         switch monitor.sessions.count {
-        case 0: return "Sessions tracked by Agent Frame appear here"
+        case 0: return "Claude Code and Codex sessions appear here as they start"
         case 1: return "\(monitor.sessions[0].folderName) — \(subtitle) · click to open"
         default: return "\(subtitle) · click for the list"
         }
@@ -517,10 +527,13 @@ struct AgentsStackTile: View {
         let busy = sessions.filter { $0.state == .busy }.count
         if waiting > 0 { return "\(waiting) waiting" }
         if busy > 0 { return "\(busy) working" }
+        // A session whose state cannot be read is only known to be running, so the
+        // tile says that rather than calling every one of them idle.
+        if sessions.contains(where: { !$0.stateIsKnown }) { return "\(sessions.count) running" }
         return "\(sessions.count) idle"
     }
 
-    private func open() {
+    private func open(hovering: Bool = false) {
         DockTooltipController.shared.cancel()
         // One session needs no list: go straight to it.
         if monitor.sessions.count == 1 {
@@ -531,12 +544,12 @@ struct AgentsStackTile: View {
             DockStackItem(
                 id: session.id,
                 title: session.folderName,
-                subtitle: "\(session.state.title) · \((session.cwd as NSString).abbreviatingWithTildeInPath)",
+                subtitle: "\(session.stateTitle) · \(session.tool.title) · \((session.cwd as NSString).abbreviatingWithTildeInPath)",
                 icon: .dot(Color(nsColor: session.state.color)),
                 action: { AgentSessionMonitor.reveal(session) }
             )
         }
-        DockStackController.shared.toggle(
+        DockStackController.shared.present(
             for: tile.id,
             content: DockStackContent(
                 title: "Agents",
@@ -544,7 +557,8 @@ struct AgentsStackTile: View {
                 style: .list,
                 emptyText: "No agents running"
             ),
-            edge: edge
+            edge: edge,
+            hovering: hovering
         )
     }
 }
@@ -916,7 +930,7 @@ struct ProfilesWidget: View {
     private var active: DockProfile? { store.activeProfile }
 
     var body: some View {
-        CardButton(action: open) {
+        CardButton(action: { open() }, hover: { open(hovering: true) }) {
             let layout = vertical ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: environment.scaled(8)))
             layout {
                 profileIcon(active, size: environment.scaled(vertical ? 24 : 30))
@@ -956,7 +970,7 @@ struct ProfilesWidget: View {
             )
     }
 
-    private func open() {
+    private func open(hovering: Bool = false) {
         DockTooltipController.shared.cancel()
         let items = store.profiles.map { profile in
             DockStackItem(
@@ -968,7 +982,7 @@ struct ProfilesWidget: View {
                 action: { ProfileStore.shared.activate(profile.id) }
             )
         }
-        DockStackController.shared.toggle(
+        DockStackController.shared.present(
             for: tile.id,
             content: DockStackContent(
                 title: "Profiles",
@@ -982,7 +996,8 @@ struct ProfilesWidget: View {
                     action: { ManagerWindowController.shared.show(selecting: ProfileStore.shared.activeProfileID) }
                 )
             ),
-            edge: edge
+            edge: edge,
+            hovering: hovering
         )
     }
 }
@@ -1281,6 +1296,9 @@ private struct UsageServiceCard: View {
     private var report: UsageReport? { monitor.reports[service] }
     private var problem: UsageProblem? { monitor.problems[service] }
     private var remaining: Double? { report?.lowestRemaining }
+    /// What the tile says: what is left, or what has gone. The colour stays with
+    /// `remaining` either way, so a ring going red always means running out.
+    private var level: Double? { remaining.map(tile.usageMeasure.value(remaining:)) }
 
     private var tint: Color {
         guard let remaining else { return DockPalette.onSlab.opacity(0.35) }
@@ -1288,11 +1306,11 @@ private struct UsageServiceCard: View {
     }
 
     private var percentText: String {
-        remaining.map { "\(Int($0.rounded()))" } ?? "–"
+        level.map { "\(Int($0.rounded()))" } ?? "–"
     }
 
     var body: some View {
-        CardButton(action: open) {
+        CardButton(action: { open() }, hover: { open(hovering: true) }) {
             Group {
                 switch tile.usageLayout {
                 case .numbers: numbers
@@ -1320,13 +1338,13 @@ private struct UsageServiceCard: View {
                 Text(percentText)
                     .font(.system(size: environment.scaled(vertical ? 15 : 19), weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                if remaining != nil {
+                if level != nil {
                     Text("%")
                         .font(.system(size: environment.scaled(vertical ? 8 : 10), weight: .semibold, design: .rounded))
                         .foregroundStyle(DockPalette.onSlab.opacity(0.6))
                 }
             }
-            .foregroundStyle(remaining == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
+            .foregroundStyle(level == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
             label(size: vertical ? 8 : 10)
         }
     }
@@ -1339,9 +1357,9 @@ private struct UsageServiceCard: View {
         let lineWidth = LevelRing.lineWidth(for: side)
         // The number stays clear of the ring: "100" shrinks to fit the inside.
         let inside = side - lineWidth * 2 - side * 0.12
-        let showsSign = side >= 40 && remaining != nil
+        let showsSign = side >= 40 && level != nil
         return VStack(spacing: environment.scaled(2)) {
-            LevelRing(fraction: (remaining ?? 0) / 100, color: tint, lineWidth: lineWidth)
+            LevelRing(fraction: (level ?? 0) / 100, color: tint, lineWidth: lineWidth)
                 .frame(width: side, height: side)
                 .overlay(
                     VStack(spacing: -2) {
@@ -1350,7 +1368,7 @@ private struct UsageServiceCard: View {
                             .monospacedDigit()
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
-                            .foregroundStyle(remaining == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
+                            .foregroundStyle(level == nil ? DockPalette.onSlab.opacity(0.5) : DockPalette.onSlab)
                         if showsSign {
                             Text("%")
                                 .font(.system(size: side * 0.2, weight: .semibold, design: .rounded))
@@ -1372,13 +1390,13 @@ private struct UsageServiceCard: View {
             .overlay(alignment: .leading) {
                 Capsule()
                     .fill(tint)
-                    .frame(width: width * (remaining ?? 0) / 100)
-                    .animation(.easeOut(duration: 0.4), value: remaining)
+                    .frame(width: width * (level ?? 0) / 100)
+                    .animation(.easeOut(duration: 0.4), value: level)
             }
         return Group {
             if vertical {
                 VStack(spacing: environment.scaled(3)) {
-                    Text(remaining.map { "\(Int($0.rounded()))%" } ?? "–")
+                    Text(level.map { "\(Int($0.rounded()))%" } ?? "–")
                         .font(.system(size: environment.scaled(11), weight: .semibold, design: .rounded))
                         .monospacedDigit()
                     bar
@@ -1391,7 +1409,7 @@ private struct UsageServiceCard: View {
                             .font(.system(size: environment.scaled(12), weight: .semibold))
                             .lineLimit(1)
                         Spacer(minLength: 6)
-                        Text(remaining.map { "\(Int($0.rounded()))%" } ?? "–")
+                        Text(level.map { "\(Int($0.rounded()))%" } ?? "–")
                             .font(.system(size: environment.scaled(11), weight: .medium, design: .rounded))
                             .monospacedDigit()
                             .lineLimit(1)
@@ -1414,14 +1432,15 @@ private struct UsageServiceCard: View {
     // MARK: Tooltip
 
     private var tooltipTitle: String {
-        if let remaining { return "\(service.title) — \(Int(remaining.rounded()))% left" }
+        if let level { return "\(service.title) — \(Int(level.rounded()))% \(tile.usageMeasure.word)" }
         return "\(service.title) — \(problem?.title ?? "Loading…")"
     }
 
     private var tooltipDetail: String {
         if let report {
+            let measure = tile.usageMeasure
             let windows = report.windows.filter(\.isPrimary)
-                .map { "\($0.title) \(Int($0.remaining.rounded()))%" }
+                .map { "\($0.title) \(Int(measure.value(remaining: $0.remaining).rounded()))%" }
                 .joined(separator: " · ")
             if let problem { return "\(windows) · \(problem.hint(for: service))" }
             return "\(windows) · click for details"
@@ -1432,20 +1451,24 @@ private struct UsageServiceCard: View {
     // MARK: Stack
 
     /// Every window with its reset, or what went wrong.
-    private func open() {
+    private func open(hovering: Bool = false) {
         DockTooltipController.shared.cancel()
         let now = Date()
         var items: [DockStackItem] = []
         if let report {
+            let measure = tile.usageMeasure
             for window in report.windows {
-                var parts = ["\(Int(window.remaining.rounded()))% left"]
+                let shown = measure.value(remaining: window.remaining)
+                var parts = ["\(Int(shown.rounded()))% \(measure.word)"]
                 if let detail = window.detail { parts.append(detail) }
                 if let reset = Self.resetText(window, now: now) { parts.append(reset) }
                 items.append(DockStackItem(
                     id: window.id,
                     title: window.title,
                     subtitle: parts.joined(separator: " · "),
-                    icon: .ring(window.remaining / 100, Self.tint(for: window.remaining)),
+                    // The ring follows the number on the tile; its colour still
+                    // says how much is left.
+                    icon: .ring(shown / 100, Self.tint(for: window.remaining)),
                     action: { NSWorkspace.shared.open(service.usagePage) }
                 ))
             }
@@ -1462,7 +1485,7 @@ private struct UsageServiceCard: View {
         var title = service.title
         if let plan = report?.plan { title += " · \(Self.planTitle(plan))" }
         if let fetched = report?.fetchedAt { title += " · updated \(Self.ago(fetched, now: now))" }
-        DockStackController.shared.toggle(
+        DockStackController.shared.present(
             for: stackID,
             content: DockStackContent(
                 title: title,
@@ -1476,7 +1499,8 @@ private struct UsageServiceCard: View {
                     action: { AIUsageMonitor.shared.refresh(service, interactive: true) }
                 )
             ),
-            edge: edge
+            edge: edge,
+            hovering: hovering
         )
     }
 

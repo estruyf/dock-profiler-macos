@@ -633,7 +633,10 @@ struct CustomDockView: View {
         .onPreferenceChange(HostFrameKey.self) { frameInHost = $0 }
         .onPreferenceChange(StripLengthKey.self) { measuredLength = $0 }
         .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 ?? 0 }
-        .onChange(of: items) { pendingOrder = nil }
+        // The profile has caught up with the drag; the draft has done its job.
+        // Not while one is still in hand: the row would drop back under the
+        // pointer, and the drop would have nothing left to write.
+        .onChange(of: items) { if dragging == nil { pendingOrder = nil } }
         .onChange(of: naturalLength) { updateOverflow() }
         .onChange(of: cap) { updateOverflow() }
         // Capped, the slab's length is the dock's own doing; the panel follows it.

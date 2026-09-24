@@ -273,6 +273,11 @@ final class ProfileStore: ObservableObject {
         guard settings.autoSaveActiveProfile else { return }
         guard Date() > ignoreDockChangesUntil, !isApplying else { return }
         guard let id = activeProfileID, let index = profiles.firstIndex(where: { $0.id == id }) else { return }
+        // A combined custom dock stands in for the Dock, which is parked out of
+        // reach: nothing in its preferences is the user rearranging it, only the
+        // system writing about running apps and recents. Following that would undo
+        // what was just dragged together on the custom dock itself.
+        guard !profiles[index].customDock.isCombined else { return }
 
         let snapshot = DockService.snapshot()
         var changed = false

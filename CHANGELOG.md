@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.3] - 2026-09-24
+
+### Fixed
+
+- **An app kept in the custom dock by dragging it out of the running section
+  disappeared again when you quit it.** The pin itself was saved; auto-save
+  then took it back out. A combined custom dock stands in for the Dock, so the
+  Dock is parked out of reach — but auto-save went on reading its preferences
+  and writing whatever it found over the profile's app row, and the Dock
+  rewrites those preferences by itself as apps come and go. Quitting the app
+  you had just pinned was one such write, which is why the pin looked like it
+  had never been stored. Auto-save now leaves the app row alone while a
+  combined custom dock is the dock you are using; every other profile still
+  follows the Dock as before. The same write was undoing **Remove from Dock**
+  and a reorder dragged together on the custom dock, which now stay put too.
+- **A drop on the custom dock could be dropped on the floor.** If the profile
+  changed while a tile was in hand — auto-save above being the likeliest cause
+  — the dragged-out order was thrown away mid-drag, and letting go had nothing
+  left to write. The order in hand is now kept until the drag ends.
+
 ## [1.13.2] - 2026-09-23
 
 ### Fixed

@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var badges = DockBadgeMonitor.shared
+    @ObservedObject private var browserAccess = BrowserDataAccess.shared
     @EnvironmentObject private var store: ProfileStore
 
     var body: some View {
@@ -73,7 +74,23 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Text("Optional. Lets a custom dock show the Dock's notification badges on its app tiles, read from the macOS Dock, and list an app's open windows in its tile's menu. Nothing else is read. Every other permission is asked for in place, by the widget that needs it.")
+                Text("Optional. Lets a custom dock show the Dock's notification badges on its app tiles, read from the macOS Dock, and list an app's open windows in its tile's menu. Nothing else is read.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                LabeledContent("Browser profiles") {
+                    switch browserAccess.status {
+                    case .allowed:
+                        Label("Allowed", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    case .denied:
+                        Button("Open Full Disk Access Settings…") { browserAccess.requestAccess() }
+                    case .noBrowsers:
+                        Text("No browser found")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text("Optional. Lets a browser's tile list its profiles — Chrome's, Edge's, Firefox's — and a launcher open one, read from the browser's own profile list. macOS keeps each browser's files to itself unless Dock Profiler has Full Disk Access. Every other permission is asked for in place, by the widget that needs it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -97,7 +114,10 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { badges.refreshTrust() }
+        .onAppear {
+            badges.refreshTrust()
+            browserAccess.refresh()
+        }
         .toolbar { toolbarContent }
     }
 

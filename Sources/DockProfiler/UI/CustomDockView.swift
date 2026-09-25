@@ -313,6 +313,8 @@ private struct WidgetSettingsMenu: View {
                                 .tag(String?.some(profile.id))
                         }
                     }
+                } else if !BrowserDataAccess.shared.isAllowed {
+                    Button("Show Profiles Here…") { BrowserDataAccess.shared.requestAccess() }
                 }
             }
             Divider()
@@ -1597,11 +1599,18 @@ private struct AppTileView: View {
     /// A browser's profiles, as its own Dock menu lists them: the account's
     /// picture or initial, a check mark on the ones with a window up, and
     /// choosing one opens a new window as that profile. Nil for any other app,
-    /// and for a browser with no profiles to show.
+    /// and for a browser with no profiles to show. Where macOS keeps the
+    /// browser's files from the app, one item that leads to the permission, as
+    /// the windows do without Accessibility.
     private var profiles: NSMenuItem? {
         guard let identifier = tile.bundleIdentifier, let url, BrowserProfiles.isBrowser(identifier) else { return nil }
         let profiles = BrowserProfiles.profiles(of: identifier)
-        guard !profiles.isEmpty else { return nil }
+        guard !profiles.isEmpty else {
+            let access = BrowserDataAccess.shared
+            access.refresh()
+            guard !access.isAllowed else { return nil }
+            return .action("Show Profiles Here…") { access.requestAccess() }
+        }
         let submenu = NSMenu(title: "Profiles")
         for profile in profiles {
             let item = submenu.addItem(profile.name) { BrowserProfiles.open(profile, of: identifier, at: url) }
@@ -1743,13 +1752,21 @@ private extension DockStacking {
     }
 }
 
+private extension NSMenuItem {
+    /// An item that runs the closure when chosen.
+    static func action(_ title: String, _ perform: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire(_:)), keyEquivalent: "")
+        let target = MenuAction(perform)
+        item.target = target
+        item.representedObject = target
+        return item
+    }
+}
+
 private extension NSMenu {
     @discardableResult
     func addItem(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: #selector(MenuAction.fire(_:)), keyEquivalent: "")
-        let target = MenuAction(action)
-        item.target = target
-        item.representedObject = target
+        let item = NSMenuItem.action(title, action)
         addItem(item)
         return item
     }

@@ -118,6 +118,22 @@ enum BrowserProfiles {
         return directories.filter { FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// The files each browser on this Mac keeps its profiles in — one per data
+    /// folder, so the Firefox builds that share one count once. Only those that
+    /// exist: a file can be seen even where macOS will not let it be opened,
+    /// which is what `BrowserDataAccess` looks for.
+    static var profileFiles: [URL] {
+        let files = Set(families.values.map { family -> URL in
+            switch family {
+            case .chromium(let directory):
+                return supportDirectory.appendingPathComponent(directory).appendingPathComponent("Local State")
+            case .firefox(let directory):
+                return supportDirectory.appendingPathComponent(directory).appendingPathComponent("profiles.ini")
+            }
+        })
+        return files.filter { FileManager.default.fileExists(atPath: $0.path) }.sorted { $0.path < $1.path }
+    }
+
     private static func isRunning(_ bundleIdentifier: String) -> Bool {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).contains { !$0.isTerminated }
     }

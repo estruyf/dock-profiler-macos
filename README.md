@@ -111,7 +111,8 @@ None for the core: Dock profiles, wallpaper and the shortcut work without
 Accessibility, Screen Recording or Automation access. A few widgets talk to other apps
 (Music, Spotify, Finder) or read protected folders, and notification badges and the
 window list on the custom dock's tiles need Accessibility — macOS asks about each the
-first time, and only if you use it. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
+first time, and only if you use it. On recent macOS, a browser's profiles on its tile
+need Full Disk Access, which the welcome screen and Settings ask for. [Permissions and privacy](docs/permissions.md) lists every prompt and why.
 
 ## Learn more
 

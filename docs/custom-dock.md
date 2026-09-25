@@ -122,6 +122,11 @@ profiles are open, so its are never marked; and as Firefox's own profile manager
 profile it already has open answers with its "already running" notice rather than
 another window. Arc is left out: its profiles belong to its spaces, not to windows.
 
+Recent macOS keeps each browser's files to the browser. Where it does, the submenu is
+**Show Profiles Here…** instead, which opens Privacy & Security → Full Disk Access;
+switch Dock Profiler on there and the profiles appear. The same permission is on the
+welcome screen and in Settings → Permissions — see [Permissions](./permissions.md).
+
 ### Recent projects
 
 Right-click Visual Studio Code on the dock and its **Recent Projects** submenu lists

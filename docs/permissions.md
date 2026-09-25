@@ -13,7 +13,9 @@ folders, and macOS asks about those the first time they do. The one exception is
 Accessibility, which two things on a combined dock's app tiles need: notification
 badges, read from the macOS Dock — an option that is off until you switch it on — and
 the list of an app's open windows in a tile's right-click menu, which is simply empty
-until access is granted.
+until access is granted. And on recent macOS, which keeps each app's files to that app,
+the browsers' profile lists need Full Disk Access: without it a browser's tile has no
+**Profiles** submenu and a launcher no profile picker.
 
 | Permission | Needed for | Prompted |
 | --- | --- | --- |
@@ -25,6 +27,7 @@ until access is granted.
 | Keychain | The AI Usage widget reading Claude Code's token from the `Claude Code-credentials` item | Only when you ask the card to refresh; a refresh on the timer never brings the dialog up |
 | Bluetooth | The Accessories widget reading the charge of accessories from other makers — a Logitech mouse, headphones — over the Bluetooth battery service. Apple's accessories need nothing | Once, when an Accessories widget first appears |
 | Accessibility | Notification badges on a combined dock's app tiles, read from the macOS Dock's own tiles; the open windows of an app in its tile's menu, read from the app itself | When **Show notification badges on app tiles** is switched on, or from **Show Windows Here…** in a tile's menu, or from the welcome screen; macOS shows its dialog once, after that it is granted under Privacy & Security → Accessibility |
+| Full Disk Access | Browser profiles: the **Profiles** submenu on a browser's tile, a launcher's profile picker and each profile's running dot, all read from the browser's own profile list — Chromium's `Local State`, Firefox's `profiles.ini`. Only macOS versions that keep one app's files from another need it; Dock Profiler checks by trying the read, and says **Allowed** where it goes through | From **Allow…** on the welcome screen, **Browser profiles** in Settings → Permissions, **Show Profiles Here…** in a browser tile's menu or on a launcher's card. macOS has no dialog for Full Disk Access, so each opens Privacy & Security → Full Disk Access; switch Dock Profiler on there |
 | Login item | Launch at login | The toggle on the welcome screen or in Settings (`SMAppService`) |
 | *(none)* | The Agents widget finding the sessions running on this Mac | The kernel answers for your own processes; nothing to grant |
 

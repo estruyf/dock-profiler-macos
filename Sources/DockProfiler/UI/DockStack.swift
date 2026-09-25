@@ -68,10 +68,55 @@ final class DockStackController {
     private var monitors: [Any] = []
     /// The widget whose stack is open, so a second click on it closes the stack.
     private(set) var openID: UUID?
+    /// The card was opened by the pointer resting on the widget rather than by a
+    /// click, so it goes away again when the pointer leaves both it and the widget.
+    /// A click on the widget while it is up pins it, and it behaves as ever after.
+    private(set) var openedByHover = false
+    private var hoverDismiss: Task<Void, Never>?
 
     private init() {}
 
     var isOpen: Bool { panel?.isVisible == true }
+
+    /// Opens the stack for a widget, from a click or from the pointer resting on
+    /// it. Hovering never closes anything: it opens the card if it is not the one
+    /// already up, and leaves it alone if it is. A click pins a card the pointer
+    /// opened rather than closing it, so the first click after a hover does not
+    /// take away what you came for.
+    func present(for id: UUID, content: DockStackContent, edge: DockStripEdge, hovering: Bool) {
+        cancelHoverDismiss()
+        guard !hovering else {
+            guard openID != id || !isOpen else { return }
+            show(for: id, content: content, edge: edge)
+            openedByHover = true
+            return
+        }
+        if openID == id, isOpen, openedByHover {
+            openedByHover = false
+            return
+        }
+        toggle(for: id, content: content, edge: edge)
+    }
+
+    /// Takes the card away shortly, for a card the pointer opened and has now left.
+    /// The wait covers the gap between the widget and the card as the pointer
+    /// crosses it; moving onto either cancels it.
+    func scheduleHoverDismiss() {
+        guard openedByHover, isOpen else { return }
+        cancelHoverDismiss()
+        hoverDismiss = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else { return }
+            self.hoverDismiss = nil
+            guard self.openedByHover else { return }
+            self.dismiss()
+        }
+    }
+
+    func cancelHoverDismiss() {
+        hoverDismiss?.cancel()
+        hoverDismiss = nil
+    }
 
     /// Opens the stack for a widget, or closes it if it is the one already open.
     func toggle(for id: UUID, content: DockStackContent, edge: DockStripEdge) {
@@ -99,6 +144,7 @@ final class DockStackController {
         // Drawn as the dock's own slab is, so the stack belongs to it.
         let slab = window.flatMap { CustomDockWindowController.shared.slabLook(in: $0) }
         hosting.rootView = DockStackView(content: content, look: slab?.look ?? DockLook(), tint: slab?.tint, dismiss: { [weak self] in self?.dismiss() })
+        openedByHover = false
         hosting.layoutSubtreeIfNeeded()
         let size = hosting.fittingSize
         let gap: CGFloat = 5
@@ -131,8 +177,10 @@ final class DockStackController {
     }
 
     func dismiss() {
+        cancelHoverDismiss()
         removeMonitors()
         openID = nil
+        openedByHover = false
         panel?.orderOut(nil)
     }
 
@@ -269,6 +317,15 @@ struct DockStackView: View {
         .background(DockSlab(look: look, tint: tint, cornerRadius: 14, overContent: true))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .environment(\.colorScheme, look.style.forcedColorScheme ?? systemColorScheme)
+        // A card the pointer opened stays for as long as the pointer is on it,
+        // and starts to leave as soon as it is not.
+        .onHover { inside in
+            if inside {
+                DockStackController.shared.cancelHoverDismiss()
+            } else {
+                DockStackController.shared.scheduleHoverDismiss()
+            }
+        }
     }
 
     /// As square a grid as the items make — two by two for four, three by three

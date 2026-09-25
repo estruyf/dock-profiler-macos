@@ -18,6 +18,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
     case appStack
     case launcher
     case aiUsage
+    case divider
 
     var id: String { rawValue }
 
@@ -36,6 +37,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .appStack: return "App Stack"
         case .launcher: return "Launcher"
         case .aiUsage: return "AI Usage"
+        case .divider: return "Divider"
         }
     }
 
@@ -54,6 +56,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .appStack: return "square.stack.3d.up"
         case .launcher: return "arrow.up.forward.app"
         case .aiUsage: return "gauge.with.dots.needle.33percent"
+        case .divider: return "rectangle.split.2x1"
         }
     }
 
@@ -63,7 +66,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .date: return "Weekday and day"
         case .battery: return "Charge and charging"
         case .accessories: return "AirPods, keyboard, mouse and trackpad batteries"
-        case .agents: return "Agent Frame sessions"
+        case .agents: return "Your Claude Code and Codex sessions"
         case .nowPlaying: return "Music or Spotify"
         case .profiles: return "Switch Dock Profiler profiles"
         case .trash: return "The Trash, with files dropped on it"
@@ -72,6 +75,7 @@ enum WidgetKind: String, Codable, CaseIterable, Identifiable {
         case .appStack: return "Apps folded into one tile"
         case .launcher: return "An app opened with arguments of your own, or a browser as one of its profiles"
         case .aiUsage: return "What is left of your Claude and Copilot allowances"
+        case .divider: return "A slim line that splits the dock into groups"
         }
     }
 
@@ -114,6 +118,29 @@ enum UsageService: String, Codable, CaseIterable, Identifiable {
         case .copilot: return "Run gh auth login in a terminal, or sign in to GitHub Copilot for Xcode"
         }
     }
+}
+
+/// Which half of an allowance the AI Usage widget puts on the tile: what is still
+/// there, or what has gone. The colour follows what is left either way — a ring
+/// turning red means the allowance is running out, whichever number is on it.
+enum UsageMeasure: String, Codable, CaseIterable, Identifiable {
+    case left
+    case used
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .left: return "Left"
+        case .used: return "Used"
+        }
+    }
+
+    /// The share of the window this measure puts on the tile, given what is left.
+    func value(remaining: Double) -> Double { self == .left ? remaining : 100 - remaining }
+
+    /// The word after the number, in a tooltip or on a card.
+    var word: String { rawValue }
 }
 
 /// How the AI Usage widget draws each service's remaining allowance.
@@ -311,6 +338,9 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     var showsProfilePicture: Bool = false
     /// Agents: a card per session, one tile with a count that opens into the list, or the icon and count alone.
     var agentsLayout: AgentsLayout = .each
+    /// Agents: sessions found running on this Mac join the ones Agent Frame
+    /// reports. Off leaves only Agent Frame's, which alone know about waiting.
+    var agentsFindsRunning: Bool = true
     /// Accessories: how each battery is drawn, which accessories are left out, and
     /// whether this Mac's own battery sits among them. Accessories are shown unless
     /// hidden, so a new one appears as soon as it connects.
@@ -320,8 +350,10 @@ struct WidgetTile: Codable, Identifiable, Hashable {
     /// Now playing: how much of the track is drawn, and previous and next buttons beside it.
     var nowPlayingLayout: NowPlayingLayout = .full
     var showsControls: Bool = false
-    /// AI usage: how the allowances are drawn, and which services are tracked, in order.
+    /// AI usage: how the allowances are drawn, whether the tile says what is left
+    /// or what is used, and which services are tracked, in order.
     var usageLayout: UsageLayout = .rings
+    var usageMeasure: UsageMeasure = .left
     var usageServices: [UsageService] = UsageService.allCases
 
     init(kind: WidgetKind, anchor: WidgetAnchor = .end) {
@@ -380,7 +412,8 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             if !arguments.isEmpty { parts.append(arguments) }
             return parts.joined(separator: " · ")
         case .agents:
-            return agentsLayout == .each ? kind.summary : agentsLayout.summary
+            let source = agentsFindsRunning ? kind.summary : "Agent Frame sessions"
+            return agentsLayout == .each ? source : "\(source), \(agentsLayout.summary.lowercased())"
         case .accessories:
             var shown = hiddenAccessoryIDs.isEmpty ? "Every accessory" : "Every accessory but \(hiddenAccessoryIDs.count)"
             if showsMacBattery { shown += " and this Mac" }
@@ -393,7 +426,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             guard !usageServices.isEmpty else { return "Nothing tracked yet" }
             let names = usageServices.map(\.title)
             let tracked = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
-            return "\(tracked), as \(usageLayout.title.lowercased())"
+            return "\(tracked), \(usageMeasure.word) as \(usageLayout.title.lowercased())"
         default:
             return kind.summary
         }
@@ -413,7 +446,7 @@ struct WidgetTile: Codable, Identifiable, Hashable {
 
     // Fields added in later versions are missing from earlier files.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, anchor, path, apps, stack, agentsLayout, nowPlayingLayout, showsControls, usageLayout, usageServices
+        case id, kind, anchor, path, apps, stack, agentsLayout, agentsFindsRunning, nowPlayingLayout, showsControls, usageLayout, usageMeasure, usageServices
         case accessoryLayout, hiddenAccessoryIDs, showsMacBattery
         case arguments, browserProfile, label, iconPath, badge, showsProfilePicture
     }
@@ -448,10 +481,15 @@ struct WidgetTile: Codable, Identifiable, Hashable {
             .flatMap(AgentsLayout.init(rawValue:)) ?? (stacked ? .one : .each)
         // A layout this build does not know — from a newer one — falls back to the
         // full one rather than making the whole file unreadable.
+        agentsFindsRunning = try container.decodeIfPresent(Bool.self, forKey: .agentsFindsRunning) ?? true
         nowPlayingLayout = (try? container.decodeIfPresent(String.self, forKey: .nowPlayingLayout))
             .flatMap(NowPlayingLayout.init(rawValue:)) ?? .full
         showsControls = try container.decodeIfPresent(Bool.self, forKey: .showsControls) ?? false
         usageLayout = try container.decodeIfPresent(UsageLayout.self, forKey: .usageLayout) ?? .rings
+        // A measure this build does not know — from a newer one — falls back to
+        // what is left rather than making the whole file unreadable.
+        usageMeasure = (try? container.decodeIfPresent(String.self, forKey: .usageMeasure))
+            .flatMap(UsageMeasure.init(rawValue:)) ?? .left
         usageServices = try container.decodeIfPresent([UsageService].self, forKey: .usageServices) ?? UsageService.allCases
         // A layout this build does not know — from a newer one, or an earlier name —
         // falls back to the default rather than making the whole file unreadable.
@@ -472,9 +510,11 @@ struct WidgetTile: Codable, Identifiable, Hashable {
         try container.encode(stack, forKey: .stack)
         try container.encode(apps, forKey: .apps)
         try container.encode(agentsLayout, forKey: .agentsLayout)
+        try container.encode(agentsFindsRunning, forKey: .agentsFindsRunning)
         try container.encode(nowPlayingLayout, forKey: .nowPlayingLayout)
         try container.encode(showsControls, forKey: .showsControls)
         try container.encode(usageLayout, forKey: .usageLayout)
+        try container.encode(usageMeasure, forKey: .usageMeasure)
         try container.encode(usageServices, forKey: .usageServices)
         try container.encode(accessoryLayout, forKey: .accessoryLayout)
         try container.encode(hiddenAccessoryIDs, forKey: .hiddenAccessoryIDs)
@@ -698,6 +738,65 @@ struct DockLook: Codable, Hashable {
     var drawsTileCards: Bool { tileCards || !style.hasPlate }
 }
 
+/// How the dock comes and goes.
+enum DockVisibility: String, Codable, CaseIterable, Identifiable {
+    /// Always on screen, as the Dock is with auto-hide off.
+    case always
+    /// Off screen until the pointer runs into the edge where it lives.
+    case autohide
+    /// Off screen behind a small pill that stays on the edge: the dock opens when
+    /// the pointer reaches the pill itself, rather than anywhere along the edge,
+    /// so the rest of that edge stays yours.
+    case pill
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .always: return "Always visible"
+        case .autohide: return "Hide automatically"
+        case .pill: return "Pill on the edge"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .always: return "On screen for as long as the profile is active"
+        case .autohide: return "Slides away, and comes back when the pointer reaches its edge"
+        case .pill: return "Slides away behind a pill, and opens when the pointer reaches the pill"
+        }
+    }
+
+    /// Whether the dock spends its time off screen.
+    var hides: Bool { self != .always }
+}
+
+/// Whether the dock floats off its screen edge or is fused to it.
+enum DockAttachment: String, Codable, CaseIterable, Identifiable {
+    /// A little off the edge, with the slab rounded all round — as the dock has
+    /// always been drawn, and as the Tahoe Dock is.
+    case floating
+    /// Running into the edge, its corners there squared off, the way the menu bar
+    /// meets the top of the screen.
+    case attached
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .floating: return "Floating"
+        case .attached: return "Joined to the edge"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .floating: return "A little off the screen edge, rounded all round"
+        case .attached: return "Against the screen edge, squared off where they meet"
+        }
+    }
+}
+
 /// The optional custom-dock half of a profile. When `enabled` is false — or the
 /// dock would be empty — activating the profile takes the panel away.
 struct CustomDockOptions: Codable, Hashable {
@@ -712,10 +811,17 @@ struct CustomDockOptions: Codable, Hashable {
     /// then keep their docks on the outer edges, leaving the shared edge clear
     /// for the pointer to cross.
     var displayPlacements: [String: DockPlacement] = [:]
-    /// Slides off screen until the pointer reaches its edge.
-    var autohide: Bool = false
-    /// While hidden, a slim mark stays on the edge so you know the dock is there.
+    /// Whether the dock is always on screen, slides away until the pointer reaches
+    /// its edge, or waits behind a pill on it.
+    var visibility: DockVisibility = .always
+    /// While hidden behind auto-hide, a slim mark stays on the edge so you know the
+    /// dock is there. The pill is that mark made a target, so it is always drawn.
     var edgeHint: Bool = true
+    /// Whether the slab floats off its screen edge or is joined to it.
+    var attachment: DockAttachment = .floating
+    /// A widget's card opens when the pointer rests on it, rather than waiting for
+    /// a click. The card is the same one either way.
+    var hoverCards: Bool = false
     /// Height of an app icon or widget card, in points.
     var tileSize: Double = 56
     /// Tiles grow under the pointer, as the Dock's do.
@@ -734,6 +840,20 @@ struct CustomDockOptions: Codable, Hashable {
     var widgets: [WidgetTile] = []
 
     var isCombined: Bool { enabled && mode == .combined }
+
+    /// Whether the dock spends its time off screen — auto-hide or the pill. Both
+    /// hide it; they differ in what brings it back.
+    var autohide: Bool { visibility.hides }
+
+    /// Whether a mark is left on the edge while the dock is away. The pill is one
+    /// by definition; auto-hide leaves it to the profile.
+    var showsEdgeMark: Bool {
+        switch visibility {
+        case .always: return false
+        case .autohide: return edgeHint
+        case .pill: return true
+        }
+    }
 
     /// The position every display takes unless it has one of its own.
     var placement: DockPlacement {
@@ -875,7 +995,14 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, displays, displayPlacements, autohide, edgeHint, tileSize, magnification, magnifiedSize, maxLength, showsRunningApps, showsBadges, look, widgets
+        case enabled, mode, edge, alignment, displays, displayPlacements, visibility, edgeHint, attachment, hoverCards, tileSize, magnification, magnifiedSize, maxLength, showsRunningApps, showsBadges, look, widgets
+    }
+
+    /// Keys earlier versions wrote, and that are still written for them to read.
+    private enum LegacyKeys: String, CodingKey {
+        /// Before there were three ways for the dock to come and go: on for the
+        /// pointer-reaches-the-edge one, off for always visible.
+        case autohide
     }
 
     init(from decoder: Decoder) throws {
@@ -887,8 +1014,17 @@ extension CustomDockOptions {
         alignment = try container.decodeIfPresent(DockStripAlignment.self, forKey: .alignment) ?? defaults.alignment
         displays = try container.decodeIfPresent(DockDisplays.self, forKey: .displays) ?? defaults.displays
         displayPlacements = try container.decodeIfPresent([String: DockPlacement].self, forKey: .displayPlacements) ?? defaults.displayPlacements
-        autohide = try container.decodeIfPresent(Bool.self, forKey: .autohide) ?? defaults.autohide
+        // A visibility this build does not know — from a newer one — falls back to
+        // always visible rather than making the whole store unreadable. Before there
+        // were three, `autohide` chose between the first two.
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+        let hid = try legacy.decodeIfPresent(Bool.self, forKey: .autohide) ?? false
+        visibility = (try? container.decodeIfPresent(String.self, forKey: .visibility))
+            .flatMap(DockVisibility.init(rawValue:)) ?? (hid ? .autohide : defaults.visibility)
         edgeHint = try container.decodeIfPresent(Bool.self, forKey: .edgeHint) ?? defaults.edgeHint
+        attachment = (try? container.decodeIfPresent(String.self, forKey: .attachment))
+            .flatMap(DockAttachment.init(rawValue:)) ?? defaults.attachment
+        hoverCards = try container.decodeIfPresent(Bool.self, forKey: .hoverCards) ?? defaults.hoverCards
         tileSize = try container.decodeIfPresent(Double.self, forKey: .tileSize) ?? defaults.tileSize
         magnification = try container.decodeIfPresent(Bool.self, forKey: .magnification) ?? defaults.magnification
         magnifiedSize = try container.decodeIfPresent(Double.self, forKey: .magnifiedSize) ?? defaults.magnifiedSize
@@ -897,5 +1033,32 @@ extension CustomDockOptions {
         showsBadges = try container.decodeIfPresent(Bool.self, forKey: .showsBadges) ?? defaults.showsBadges
         look = try container.decodeIfPresent(DockLook.self, forKey: .look) ?? defaults.look
         widgets = try container.decodeIfPresent([WidgetTile].self, forKey: .widgets) ?? defaults.widgets
+    }
+
+    /// Writes the old `autohide` flag beside `visibility`, so a build from before
+    /// the pill still hides the dock for the profiles that ask for it.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(enabled, forKey: .enabled)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(edge, forKey: .edge)
+        try container.encode(alignment, forKey: .alignment)
+        try container.encode(displays, forKey: .displays)
+        try container.encode(displayPlacements, forKey: .displayPlacements)
+        try container.encode(visibility, forKey: .visibility)
+        try container.encode(edgeHint, forKey: .edgeHint)
+        try container.encode(attachment, forKey: .attachment)
+        try container.encode(hoverCards, forKey: .hoverCards)
+        try container.encode(tileSize, forKey: .tileSize)
+        try container.encode(magnification, forKey: .magnification)
+        try container.encode(magnifiedSize, forKey: .magnifiedSize)
+        try container.encodeIfPresent(maxLength, forKey: .maxLength)
+        try container.encode(showsRunningApps, forKey: .showsRunningApps)
+        try container.encode(showsBadges, forKey: .showsBadges)
+        try container.encode(look, forKey: .look)
+        try container.encode(widgets, forKey: .widgets)
+
+        var legacy = encoder.container(keyedBy: LegacyKeys.self)
+        try legacy.encode(visibility.hides, forKey: .autohide)
     }
 }

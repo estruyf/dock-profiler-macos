@@ -57,11 +57,20 @@ dock of its own. Any display can be given an edge and alignment of its own on it
 underneath, so two displays side by side can keep their docks on the outer edges and
 leave the edge between them clear for the pointer.
 
-**Hide until the pointer reaches its edge** slides it off screen and brings it back
-when the pointer runs into the edge where it lives. While it is away, a slim mark stays
-on the edge where it went, so you know something is there to open; it brightens a
-little as the pointer heads its way. Turn that off if you would rather have the edge to
-yourself.
+**Showing** picks how the dock comes and goes. **Always visible** keeps it on screen
+for as long as the profile is active. **Hide automatically** slides it off screen and
+brings it back when the pointer runs into the edge where it lives; while it is away, a
+slim mark stays on the edge where it went, so you know something is there to open, and
+it brightens a little as the pointer heads its way — turn that off if you would rather
+have the edge to yourself. **Pill on the edge** hides it too, but leaves a small pill
+there and opens the dock only when the pointer reaches the pill itself, so the rest of
+that edge stays yours.
+
+**Sits** is where the slab meets the screen. **Floating** leaves it a little off the
+edge, rounded all round, as it has always been drawn. **Joined to the edge** runs it
+into the edge with the corners there squared off, the way the menu bar meets the top of
+the screen. Liquid Glass keeps its corners rounded either way: it shapes itself from a
+radius alone.
 
 ## Look
 
@@ -86,6 +95,10 @@ yourself.
   and is solid regardless while macOS's Reduce transparency is on.
 - It can take a wash of the profile's colour, so each profile's dock is its own.
 - Widgets can lose their cards for a flatter look.
+- **Open a widget's card when the pointer rests on it** brings out the card a click
+  opens — a stack's files, the agent sessions, a service's usage — after a moment of
+  hovering, and takes it away again when the pointer leaves both the widget and the
+  card. A click still opens it at once, and pins it so it stays.
 - A **density** picks how tightly the tiles are packed, the corners squaring off as it
   tightens.
 
@@ -128,8 +141,8 @@ pointer.
 
 Right-click anywhere on the dock for **Custom Dock Settings…**, which opens the profile
 on the Custom Dock tab; on an app tile it is at the top of the menu, with Remove from
-Dock. On a widget the item is **Widget Settings…**, which opens the Widgets tab
-instead. A widget's own settings — the folder a stack opens, the apps in a stack, a
+Dock. On a widget the item is **Widget Settings…**, which opens the Widgets tab on that
+widget's own card, unfolded and scrolled to — as double-clicking the widget does. A widget's own settings — the folder a stack opens, the apps in a stack, a
 layout, what an Accessories widget shows — are in its context menu too, so the dock
 can be set up without leaving it.
 
@@ -186,10 +199,13 @@ it in.
 - **Launcher** — an app opened with arguments of your own: Chrome as your work
   profile, VS Code on a project, a browser in incognito. Drawn as an app tile, with
   the running dot, and an icon of its own if you give it one. See below.
-- **Agents** — see below. A card per session, one tile with a count that opens into
-  the list, or just the icon and the count.
-- **AI Usage** — what is left of your Claude and GitHub Copilot allowances, a card per
-  service, as numbers, rings or bars. See below.
+- **Agents** — see below. A card per Claude Code or Codex session, one tile with a
+  count that opens into the list, or just the icon and the count.
+- **AI Usage** — how much of your Claude and GitHub Copilot allowances is left, or how
+  much has gone, a card per service, as numbers, rings or bars. See below.
+- **Divider** — a slim line that splits the dock into groups, the same one the running
+  apps are marked off with. It draws along the dock in a row and across it in a column,
+  and has nothing to set.
 
 Stacks open in a panel beside the dock, on the side away from its edge, that goes away
 on a click anywhere else — and, like the dock, never takes focus from the front app.
@@ -259,13 +275,27 @@ launcher shows its own icon and badge, with the profile and arguments under its 
 
 ### Agents
 
-If you use [Agent Frame](https://github.com/estruyf/vscode-agent-frame) in VS Code, the
-**Agents** widget shows a card per Claude Code session — folder, and whether it is
-working, waiting for you, or idle, in Agent Frame's own colours, the ones that need you
-first. There is nothing extra to set up. Beyond four sessions the rest fold into a menu.
+The **Agents** widget shows a card per coding-agent session — the folder, and what the
+session is doing — the ones that need you first. There is nothing to set up. Beyond
+four sessions the rest fold into a menu.
+
+It reads from two places. The **Claude Code and Codex sessions running on this Mac** are
+found by their own processes: the widget asks the kernel which processes are running,
+what each was started as and the folder it is in, and looks at when the agent last wrote
+to its record of that folder — the file's modification time, never a line of what is in
+it. Nothing outside an agent says when it is waiting for an answer, so a session found
+this way is **working** or **idle**. Codex keeps no such record per folder, so its
+sessions are listed as **running** and no more — better than calling a busy one idle.
+
+[Agent Frame](https://github.com/estruyf/vscode-agent-frame)'s Claude Code hooks, if you
+use them in VS Code, report **working**, **waiting for you** and **idle** in Agent
+Frame's own colours, since a hook fires the moment a session stops for you. Its word
+wins for any folder it is reporting on, and the sessions it does not have are filled in
+from the processes. **Find the sessions running on this Mac**, on the widget's card and
+in its context menu, turns the process side off and leaves Agent Frame's sessions alone.
 
 Click a card to bring that session's editor forward — VS Code, Insiders or Cursor,
-whichever is hosting it.
+whichever is hosting it; a session started in a terminal brings the terminal forward.
 
 On its card in the editor, or in its context menu, choose how the widget is drawn:
 **Each agent** for a card per session; **One tile** for a single tile with a count in
@@ -277,8 +307,10 @@ app icon. With one session, the tile opens it straight away.
 
 The **AI Usage** widget shows how much of your **Claude** and **GitHub Copilot**
 allowances is left — one card per service, drawn as numbers, rings or bars (pick on its
-card in the editor, along with which services to track). Each card shows the tightest
-of the service's main windows: Claude's 5-hour and weekly limits, Copilot's premium
+card in the editor, along with which services to track). **Show** switches the cards
+between what is **left** and what is **used**; the colour follows what is left either
+way, so a ring going red always means the allowance is running out. Each card shows the
+tightest of the service's main windows: Claude's 5-hour and weekly limits, Copilot's premium
 requests for the month. Orange, red under a tenth, the ring drawn as the battery rings
 are. Click a card for every window with its reset time and countdown — Claude's
 per-model weekly limits included — and refresh or jump to the service's usage page from

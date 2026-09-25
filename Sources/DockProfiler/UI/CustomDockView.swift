@@ -24,6 +24,12 @@ private struct DockBadgesKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// The profile opens a widget's card when the pointer rests on it. Off in the
+/// editor's preview, where a card sliding out over the form would be in the way.
+private struct DockHoverCardsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 /// Whether widgets draw a card behind themselves.
 private struct DockTileCardsKey: EnvironmentKey {
     static let defaultValue = true
@@ -84,6 +90,11 @@ extension EnvironmentValues {
         set { self[DockTileCardsKey.self] = newValue }
     }
 
+    var dockHoverCards: Bool {
+        get { self[DockHoverCardsKey.self] }
+        set { self[DockHoverCardsKey.self] = newValue }
+    }
+
     var dockSettingsAction: (() -> Void)? {
         get { self[DockSettingsActionKey.self] }
         set { self[DockSettingsActionKey.self] = newValue }
@@ -109,8 +120,9 @@ extension EnvironmentValues {
         set { self[DockWidgetUpdateKey.self] = newValue }
     }
 
-    /// Opens the Widgets tab of the profile's editor; nil in the editor's preview.
-    var dockWidgetsAction: (() -> Void)? {
+    /// Opens the Widgets tab of the profile's editor, on the widget's own card when
+    /// given one; nil in the editor's preview.
+    var dockWidgetsAction: ((UUID?) -> Void)? {
         get { self[DockWidgetsActionKey.self] }
         set { self[DockWidgetsActionKey.self] = newValue }
     }
@@ -157,7 +169,7 @@ private struct DockStackTargetedKey: EnvironmentKey {
 }
 
 private struct DockWidgetsActionKey: EnvironmentKey {
-    static let defaultValue: (() -> Void)? = nil
+    static let defaultValue: ((UUID?) -> Void)? = nil
 }
 
 /// Opens the widget gallery beside the dock. Set on the live dock; nil in the
@@ -235,8 +247,8 @@ private struct DockContextMenu<Items: View>: ViewModifier {
             if let remove { Button("Remove from Dock", action: remove) }
             if let stacking { DockStackingMenu(stacking: stacking) }
             if let addWidget { Button("Add Widget…", action: addWidget) }
-            // A widget's menu leads to the Widgets tab, where its card is.
-            if let openWidgets { Button("Widget Settings…", action: openWidgets) }
+            // A widget's menu leads to its own card on the Widgets tab.
+            if let openWidgets { Button("Widget Settings…") { openWidgets(widget?.id) } }
             else if let openSettings { Button("Custom Dock Settings…", action: openSettings) }
             if remove != nil || stacking != nil || addWidget != nil || openSettings != nil, hasSettings || Items.self != EmptyView.self { Divider() }
             items
@@ -313,6 +325,8 @@ private struct WidgetSettingsMenu: View {
                 ForEach(AgentsLayout.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.inline)
+            Divider()
+            Toggle("Find Sessions Running Here", isOn: binding(\.agentsFindsRunning))
         case .nowPlaying:
             Picker("Layout", selection: binding(\.nowPlayingLayout)) {
                 ForEach(NowPlayingLayout.allCases) { Text($0.title).tag($0) }
@@ -323,6 +337,11 @@ private struct WidgetSettingsMenu: View {
         case .aiUsage:
             Picker("Layout", selection: binding(\.usageLayout)) {
                 ForEach(UsageLayout.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Picker("Show", selection: binding(\.usageMeasure)) {
+                ForEach(UsageMeasure.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.inline)
             Divider()
@@ -508,6 +527,12 @@ struct CustomDockView: View {
     var look = DockLook()
     /// The profile's colour, washed over the slab when the look asks for it.
     var tint: Color? = nil
+    /// The screen edge the slab is joined to, whose corners are squared off; nil
+    /// for a dock that floats clear of every edge.
+    var flatEdge: DockStripEdge? = nil
+    /// A widget's card opens when the pointer rests on it. Off in the editor's
+    /// preview, where a card sliding out over the form would be in the way.
+    var hoverCards = false
     /// The most room the screen has for the slab along its edge, the headroom for
     /// magnification left out. Nil in the editor's preview, which has no screen.
     var screenLength: CGFloat? = nil
@@ -612,12 +637,13 @@ struct CustomDockView: View {
         // of the material, which would otherwise take the click.
         .modifier(SlabContextMenu())
         .background(plate)
-        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .contentShape(UnevenRoundedRectangle(cornerRadii: DockSlab.radii(cornerRadius, flatEdge: flatEdge), style: .continuous))
         // A forced light or dark style colours the tiles and cards too, not just the
         // slab. The panel sets the same appearance on its window; this covers the
         // preview in the editor, whose window keeps the system's.
         .environment(\.colorScheme, style.forcedColorScheme ?? systemColorScheme)
         .environment(\.dockTileCards, look.drawsTileCards)
+        .environment(\.dockHoverCards, hoverCards)
         .environment(\.dockShowsBadges, showsBadges)
         .modifier(BadgeSubscription(active: showsBadges))
         // Over the whole slab, padding included, as the Dock magnifies; the pointer
@@ -633,7 +659,10 @@ struct CustomDockView: View {
         .onPreferenceChange(HostFrameKey.self) { frameInHost = $0 }
         .onPreferenceChange(StripLengthKey.self) { measuredLength = $0 }
         .onPreferenceChange(ScrollOffsetKey.self) { scrollOffset = $0 ?? 0 }
-        .onChange(of: items) { pendingOrder = nil }
+        // The profile has caught up with the drag; the draft has done its job.
+        // Not while one is still in hand: the row would drop back under the
+        // pointer, and the drop would have nothing left to write.
+        .onChange(of: items) { if dragging == nil { pendingOrder = nil } }
         .onChange(of: naturalLength) { updateOverflow() }
         .onChange(of: cap) { updateOverflow() }
         // Capped, the slab's length is the dock's own doing; the panel follows it.
@@ -863,7 +892,7 @@ struct CustomDockView: View {
     @ViewBuilder
     private var plate: some View {
         if style.hasPlate {
-            DockSlab(look: look, tint: tint, cornerRadius: cornerRadius)
+            DockSlab(look: look, tint: tint, cornerRadius: cornerRadius, flatEdge: flatEdge)
         }
     }
 
@@ -1801,6 +1830,10 @@ struct WidgetTileView: View {
     let tile: WidgetTile
 
     @Environment(\.dockVertical) private var vertical
+    /// A double-click on any widget goes to its card in the editor, so its settings
+    /// are one gesture away without going through the menu. Nil in the editor's
+    /// preview, which is already there.
+    @Environment(\.dockWidgetsAction) private var openWidgets
 
     var body: some View {
         Group {
@@ -1819,10 +1852,15 @@ struct WidgetTileView: View {
             case .airDrop: AirDropWidget(tile: tile)
             case .folderStack: FolderStackWidget(tile: tile)
             case .aiUsage: AIUsageWidget(tile: tile)
+            case .divider: DividerWidget().dockContextMenu {}
             }
         }
         .foregroundStyle(DockPalette.onSlab)
         .environment(\.dockWidget, tile)
+        // Alongside whatever the widget does with a click of its own, rather than
+        // in its place: delaying every single click long enough to know a second
+        // one is not coming would make the whole dock feel slow.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { openWidgets?(tile.id) })
     }
 }
 
@@ -1859,6 +1897,40 @@ struct WidgetCard: ViewModifier {
 extension View {
     func widgetCard(square: Bool = false, height: CGFloat? = nil) -> some View {
         modifier(WidgetCard(square: square, height: height))
+    }
+
+    /// Opens the widget's card when the pointer rests on it, for a profile that
+    /// asks for it. `open` is the widget's own card — the same one a click opens.
+    func dockHoverCard(_ open: @escaping () -> Void) -> some View {
+        modifier(DockHoverCard(open: open))
+    }
+}
+
+/// Waits for the pointer to settle on a widget before opening its card, so a
+/// pointer crossing the dock on its way somewhere else does not set off every
+/// widget it passes. Leaving starts the card's own retreat, which moving onto the
+/// card cancels.
+struct DockHoverCard: ViewModifier {
+    let open: () -> Void
+
+    @Environment(\.dockHoverCards) private var enabled
+    @State private var waiting: Task<Void, Never>?
+
+    /// Long enough to tell resting on a widget from passing over it.
+    private static let delay: UInt64 = 350_000_000
+
+    func body(content: Content) -> some View {
+        content.onHover { inside in
+            waiting?.cancel()
+            waiting = nil
+            guard enabled else { return }
+            guard inside else { return DockStackController.shared.scheduleHoverDismiss() }
+            waiting = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.delay)
+                guard !Task.isCancelled else { return }
+                open()
+            }
+        }
     }
 }
 
@@ -1960,10 +2032,31 @@ private struct BatteryWidget: View {
 
 // MARK: - Agents
 
-/// The coding agents Agent Frame is tracking: a card per session, each a button
+/// The coding agents at work: a card per session, each a button
 /// that brings the editor window hosting it forward — beyond a few, the rest fold
 /// into a menu so the dock does not run away — or, folded into one tile, a count
 /// that opens into the list, with or without the words.
+/// A slim line that splits the dock into groups, the way the running-apps divider
+/// does — drawn across the dock in a column, along it in a row. The line itself is
+/// a hair wide, so the widget keeps a wider clear footprint around it: something to
+/// aim a right-click or a drag at, and a little air on either side of the groups.
+private struct DividerWidget: View {
+    @Environment(\.dockTileSize) private var size
+    @Environment(\.dockVertical) private var vertical
+
+    /// What the line is there to be grabbed by, across the dock's axis.
+    private var reach: CGFloat { 10 }
+
+    var body: some View {
+        Rectangle()
+            .fill(DockPalette.onSlab.opacity(0.18))
+            .frame(width: vertical ? size * 0.6 : 1, height: vertical ? 1 : size * 0.6)
+            .frame(width: vertical ? nil : reach, height: vertical ? reach : nil)
+            .frame(maxWidth: vertical ? .infinity : nil)
+            .contentShape(Rectangle())
+    }
+}
+
 private struct AgentsWidget: View {
     let tile: WidgetTile
 
@@ -1994,7 +2087,11 @@ private struct AgentsWidget: View {
                 }
             }
         }
-        .onAppear { monitor.retain() }
+        .onAppear {
+            monitor.includesDiscovered = tile.agentsFindsRunning
+            monitor.retain()
+        }
+        .onChange(of: tile.agentsFindsRunning) { monitor.includesDiscovered = tile.agentsFindsRunning }
         .onDisappear { monitor.release() }
     }
 
@@ -2004,7 +2101,7 @@ private struct AgentsWidget: View {
                 Button {
                     AgentSessionMonitor.reveal(session)
                 } label: {
-                    Text("\(session.folderName) — \(session.state.title)")
+                    Text("\(session.folderName) — \(session.stateTitle)")
                 }
             }
         } label: {
@@ -2056,9 +2153,9 @@ private struct SessionChip: View {
         )
         .onHover { hovering = $0 }
         .dockTooltip(
-            session.map { "\($0.folderName) — \($0.state.title)" } ?? "No agents",
-            session.map { "\(($0.cwd as NSString).abbreviatingWithTildeInPath) · click to open" }
-                ?? "Sessions tracked by Agent Frame appear here"
+            session.map { "\($0.folderName) — \($0.stateTitle)" } ?? "No agents",
+            session.map { "\(($0.cwd as NSString).abbreviatingWithTildeInPath) · \($0.sourceHint) · click to open" }
+                ?? "Claude Code and Codex sessions appear here as they start"
         )
     }
 
@@ -2069,7 +2166,7 @@ private struct SessionChip: View {
                 Text(session?.folderName ?? "No agents")
                     .font(.system(size: environment.scaled(13), weight: .semibold))
                     .lineLimit(1)
-                Text(session?.state.title ?? "Agent Frame")
+                Text(session?.stateTitle ?? "None running")
                     .font(.system(size: environment.scaled(10), weight: .medium))
                     .foregroundStyle(stateColor)
                     .lineLimit(1)
@@ -2136,6 +2233,10 @@ struct DockSlab: View {
     let look: DockLook
     let tint: Color?
     let cornerRadius: CGFloat
+    /// The screen edge the slab is joined to: its corners there are squared off, so
+    /// the dock reads as part of the edge rather than as something laid over it.
+    /// Nil for a slab that floats clear, and for the tips and stacks that open off it.
+    var flatEdge: DockStripEdge? = nil
     /// Set for a slab that floats over other apps' windows rather than the desktop:
     /// a tip or a stack. Its shade is then held near the appearance's own, since a
     /// blur would otherwise take the shade of the window behind it.
@@ -2145,8 +2246,19 @@ struct DockSlab: View {
 
     private var style: DockStyle { look.style.hasPlate ? look.style : .system }
 
+    /// The four corners for a slab of this radius joined to that edge.
+    static func radii(_ radius: CGFloat, flatEdge: DockStripEdge?) -> RectangleCornerRadii {
+        switch flatEdge {
+        case .bottom: return RectangleCornerRadii(topLeading: radius, bottomLeading: 0, bottomTrailing: 0, topTrailing: radius)
+        case .top: return RectangleCornerRadii(topLeading: 0, bottomLeading: radius, bottomTrailing: radius, topTrailing: 0)
+        case .leading: return RectangleCornerRadii(topLeading: 0, bottomLeading: 0, bottomTrailing: radius, topTrailing: radius)
+        case .trailing: return RectangleCornerRadii(topLeading: radius, bottomLeading: radius, bottomTrailing: 0, topTrailing: 0)
+        case nil: return RectangleCornerRadii(topLeading: radius, bottomLeading: radius, bottomTrailing: radius, topTrailing: radius)
+        }
+    }
+
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = UnevenRoundedRectangle(cornerRadii: Self.radii(cornerRadius, flatEdge: flatEdge), style: .continuous)
         let glass = DockMaterial.drawsGlass(style)
         // Blur off means a solid slab — except for glass, which goes clear instead.
         let solid = accessibility.reducesTransparency || (!look.translucent && !glass)
@@ -2155,7 +2267,7 @@ struct DockSlab: View {
                 shape.fill(DockPalette.solid)
             } else {
                 // Glass and blur are different views; a new style makes a new one.
-                DockMaterial(style: style, cornerRadius: cornerRadius, frosted: look.translucent)
+                DockMaterial(style: style, cornerRadius: cornerRadius, frosted: look.translucent, flatEdge: flatEdge)
                     .id(style)
             }
             // Clear glass is the colour of whatever is behind it — white over a
@@ -2189,6 +2301,22 @@ struct DockMaterial: NSViewRepresentable {
     /// Frosted glass blurs what is behind it; clear glass only refracts it. The
     /// blur styles ignore this — turning blur off makes them solid, not clear.
     var frosted = true
+    /// The edge the slab is joined to, whose corners stay square. Liquid Glass
+    /// shapes itself from a radius alone, so it keeps all four rounded; the blur
+    /// styles take the mask.
+    var flatEdge: DockStripEdge? = nil
+
+    /// Which of the layer's corners the radius applies to. A layer's minY is its
+    /// bottom: AppKit views are not flipped.
+    private var corners: CACornerMask {
+        switch flatEdge {
+        case nil: return [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        case .bottom: return [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        case .top: return [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        case .leading: return [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+        case .trailing: return [.layerMinXMinYCorner, .layerMinXMaxYCorner]
+        }
+    }
 
     /// Whether the style is drawn as Liquid Glass on this Mac.
     static func drawsGlass(_ style: DockStyle) -> Bool {
@@ -2212,6 +2340,7 @@ struct DockMaterial: NSViewRepresentable {
         view.wantsLayer = true
         view.layer?.cornerRadius = cornerRadius
         view.layer?.cornerCurve = .continuous
+        view.layer?.maskedCorners = corners
         view.layer?.masksToBounds = true
         view.appearance = style.forcedAppearance
         return view
@@ -2219,6 +2348,7 @@ struct DockMaterial: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         view.layer?.cornerRadius = cornerRadius
+        view.layer?.maskedCorners = corners
         view.appearance = style.forcedAppearance
         #if compiler(>=6.2)
         if #available(macOS 26, *), let glass = view as? NSGlassEffectView {

@@ -26,6 +26,27 @@ until access is granted.
 | Bluetooth | The Accessories widget reading the charge of accessories from other makers — a Logitech mouse, headphones — over the Bluetooth battery service. Apple's accessories need nothing | Once, when an Accessories widget first appears |
 | Accessibility | Notification badges on a combined dock's app tiles, read from the macOS Dock's own tiles; the open windows of an app in its tile's menu, read from the app itself | When **Show notification badges on app tiles** is switched on, or from **Show Windows Here…** in a tile's menu, or from the welcome screen; macOS shows its dialog once, after that it is granted under Privacy & Security → Accessibility |
 | Login item | Launch at login | The toggle on the welcome screen or in Settings (`SMAppService`) |
+| *(none)* | The Agents widget finding the sessions running on this Mac | The kernel answers for your own processes; nothing to grant |
+
+## The Agents widget
+
+The widget finds the Claude Code and Codex sessions running on this Mac by their own
+processes. Everything it reads is *metadata*, and only about processes running as you:
+
+- which processes are running (`proc_listallpids`), what each was started as
+  (`KERN_PROCARGS2` — the command line, which is where the session id comes from), the
+  folder each is in (`proc_pidinfo`), and its parent, so a session is not counted twice;
+- when the agent last wrote to its record of that folder — the modification time of the
+  newest file in `~/.claude/projects/<folder>`, found by listing the directory.
+
+No transcript is ever opened. Nothing of a conversation, a prompt or generated code is
+read, and nothing is sent anywhere: the widget makes no network requests at all. This is
+also why a session found this way is only ever **working** or **idle** — whether an
+agent is waiting for an answer is not something anything outside it says. Agent Frame's
+hooks are what report waiting; see [The custom dock](./custom-dock.md#agents).
+
+Turn the whole process side off with **Find the sessions running on this Mac** on the
+widget's card.
 
 ## The AI Usage widget
 

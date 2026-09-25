@@ -14,6 +14,7 @@ struct WidgetGroup: Identifiable {
         WidgetGroup(title: "At a glance", kinds: [.clock, .date, .battery, .accessories, .nowPlaying]),
         WidgetGroup(title: "Files and apps", kinds: [.trash, .airDrop, .folderStack, .appStack, .launcher]),
         WidgetGroup(title: "Your tools", kinds: [.profiles, .agents, .aiUsage]),
+        WidgetGroup(title: "Layout", kinds: [.divider]),
     ]
 }
 

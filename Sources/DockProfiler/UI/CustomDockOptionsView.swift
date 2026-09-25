@@ -29,6 +29,9 @@ struct CustomDockOptionsView: View {
     @State private var pendingWidgets: [WidgetTile]?
     /// The stack card a held launcher is over: letting go folds it in.
     @State private var cardTarget: UUID?
+    /// A double-click or a right-click on a widget in the dock asks for that
+    /// widget's card, which is opened and scrolled to as the tab appears.
+    @ObservedObject private var router = WindowRouter.shared
 
     /// Width of the label column, so pickers and sliders line up down the form.
     private let labelWidth: CGFloat = 104
@@ -196,14 +199,36 @@ struct CustomDockOptionsView: View {
                 ScreenDiagram(edge: options.edge, alignment: options.alignment)
                     .padding(.top, 2)
             }
-            indented {
-                VStack(alignment: .leading, spacing: 6) {
-                    Toggle("Hide until the pointer reaches its edge", isOn: $options.autohide)
-                    if options.autohide {
-                        Toggle("Leave a mark on the edge while it is hidden", isOn: $options.edgeHint)
-                            .padding(.leading, 20)
+            row("Showing") {
+                Picker("Showing", selection: $options.visibility) {
+                    ForEach(DockVisibility.allCases) { value in
+                        Text(value.title).tag(value)
                     }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 300)
+            }
+            indented {
+                VStack(alignment: .leading, spacing: 6) {
+                    caption(options.visibility.summary)
+                    if options.visibility == .autohide {
+                        Toggle("Leave a mark on the edge while it is hidden", isOn: $options.edgeHint)
+                    }
+                }
+            }
+            row("Sits") {
+                Picker("Sits", selection: $options.attachment) {
+                    ForEach(DockAttachment.allCases) { value in
+                        Text(value.title).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 300)
+            }
+            indented {
+                caption(options.attachment.summary)
             }
             row("Displays") {
                 Picker("Displays", selection: $options.displays) {
@@ -311,6 +336,8 @@ struct CustomDockOptionsView: View {
                         set: { options.look.tileCards = $0 }
                     ))
                     .disabled(!hasPlate)
+                    Toggle("Open a widget's card when the pointer rests on it", isOn: $options.hoverCards)
+                    caption("The card a click opens — a stack's files, the sessions, a service's usage — slides out on its own after a moment, and goes away when the pointer leaves it. A click still opens it at once, and pins it.")
                 }
             }
         }
@@ -361,6 +388,29 @@ struct CustomDockOptionsView: View {
     /// widgets alone. Cards are carried by their headers: down the list to
     /// reorder, or a launcher onto a stack to fold it in.
     private var widgetsPart: some View {
+        // Inside the editor's own scroll view: the reader finds it and scrolls it
+        // to the card the dock asked for.
+        ScrollViewReader { proxy in
+            widgetsList
+                .onAppear { revealRequestedWidget(proxy) }
+                .onChange(of: router.pendingWidgetID) { revealRequestedWidget(proxy) }
+        }
+    }
+
+    /// Opens the card the dock asked for and brings it into view. A widget with no
+    /// settings — a divider — is only scrolled to; there is nothing to unfold.
+    private func revealRequestedWidget(_ proxy: ScrollViewProxy) {
+        guard let id = router.pendingWidgetID else { return }
+        guard let widget = options.widgets.first(where: { $0.id == id }) else { return }
+        router.pendingWidgetID = nil
+        if widget.kind.isConfigurable { expanded.insert(id) }
+        // After the tab has laid out, or there is nothing to scroll to yet.
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+        }
+    }
+
+    private var widgetsList: some View {
         VStack(alignment: .leading, spacing: 14) {
             if !options.enabled {
                 HStack(spacing: 10) {
@@ -489,6 +539,7 @@ struct CustomDockOptionsView: View {
                         options.widgets.removeAll { $0.id == tile.id }
                     }
                 }
+                .id(tile.id)
                 .background(WidgetCardFrameReporter(id: tile.id))
                 // While held, the slot stays put — invisible — and the ghost follows the pointer.
                 .opacity(draggingCard == tile.id ? 0 : 1)
@@ -599,6 +650,7 @@ struct CustomDockOptionsView: View {
             magnificationExtra: options.magnificationExtra,
             look: options.look,
             tint: tint,
+            flatEdge: options.attachment == .attached ? options.edge : nil,
             onReorder: { options.widgets = $0.compactMap(\.widget) }
         )
         return Group {
@@ -969,15 +1021,24 @@ private struct WidgetSettingsCard<HeaderMenu: View>: View {
         case .launcher:
             LauncherFields(tile: $tile)
         case .agents:
-            Picker("Layout", selection: $tile.agentsLayout) {
-                ForEach(AgentsLayout.allCases) { layout in
-                    Text(layout.title).tag(layout)
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Layout", selection: $tile.agentsLayout) {
+                    ForEach(AgentsLayout.allCases) { layout in
+                        Text(layout.title).tag(layout)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 220)
+                Toggle("Find the sessions running on this Mac", isOn: $tile.agentsFindsRunning)
+                Text(tile.agentsFindsRunning
+                     ? "Claude Code and Codex sessions are found by their own processes, so there is nothing to install. Those say working or idle — only Agent Frame's hooks know when a session is waiting for you, and its sessions are used wherever it has them."
+                     : "Only the sessions Agent Frame reports, which alone say when one is waiting for you.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .frame(maxWidth: 220)
         case .accessories:
             accessorySettings
         case .nowPlaying:
@@ -1094,6 +1155,26 @@ private struct WidgetSettingsCard<HeaderMenu: View>: View {
             .labelsHidden()
             .controlSize(.small)
             .frame(maxWidth: 220)
+            HStack(spacing: 8) {
+                Text("Show")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Show", selection: $tile.usageMeasure) {
+                    ForEach(UsageMeasure.allCases) { measure in
+                        Text(measure.title).tag(measure)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 140)
+                Text(tile.usageMeasure == .left
+                     ? "What is still there. The ring fills as the allowance goes."
+                     : "What has gone. The ring fills as the allowance is spent; its colour still says how much is left.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack(spacing: 12) {
                 ForEach(UsageService.allCases) { service in
                     Toggle(service.title, isOn: tracks(service))

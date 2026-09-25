@@ -38,7 +38,7 @@ private struct DockPanelContent: View {
     let placement: DockPlacement
     let magnificationExtra: CGFloat
     var openSettings: (() -> Void)? = nil
-    var openWidgets: (() -> Void)? = nil
+    var openWidgets: ((UUID?) -> Void)? = nil
     var openGallery: (() -> Void)? = nil
 
     var body: some View {
@@ -89,31 +89,40 @@ private struct DockEdgeHint: View {
     let vertical: Bool
     let near: Bool
     var style: DockStyle = .system
+    /// The pill: a mark made a target. It is what the pointer has to reach for the
+    /// dock to open, so it is thicker and plainer to see than the auto-hide mark,
+    /// which only says the dock is there.
+    var prominent = false
 
     /// Glass draws a rim and shadow of its own, which is all there is room for in a
     /// sliver this thin; the plain material keeps the pill a clean line.
     private var material: DockStyle { style == .liquidGlass ? .system : style }
 
+    private var thickness: CGFloat { DockEdgeHint.thickness(prominent: prominent) }
+
     var body: some View {
         Capsule(style: .continuous)
-            .fill(DockPalette.onSlab.opacity(near ? 0.5 : 0.22))
-            .background(DockMaterial(style: material, cornerRadius: DockEdgeHint.thickness / 2).id(material))
+            .fill(DockPalette.onSlab.opacity(near ? 0.5 : (prominent ? 0.38 : 0.22)))
+            .background(DockMaterial(style: material, cornerRadius: thickness / 2).id(material))
             .overlay(Capsule(style: .continuous).strokeBorder(DockPalette.rim, lineWidth: 0.5))
             .frame(
-                width: vertical ? DockEdgeHint.thickness : nil,
-                height: vertical ? nil : DockEdgeHint.thickness
+                width: vertical ? thickness : nil,
+                height: vertical ? nil : thickness
             )
             .padding(DockEdgeHint.padding)
             .animation(.easeOut(duration: 0.2), value: near)
     }
 
-    static let thickness: CGFloat = 4
+    static func thickness(prominent: Bool) -> CGFloat { prominent ? 7 : 4 }
     /// Room for the panel to draw a soft edge outside the pill.
     static let padding: CGFloat = 2
     /// How far in from the screen edge the pill sits.
     static let inset: CGFloat = 5
-    /// How much of the dock's length the pill spans, within limits.
-    static func length(along dockLength: CGFloat) -> CGFloat { min(max(dockLength * 0.35, 48), 160) }
+    /// How much of the dock's length the pill spans, within limits. The pill is a
+    /// target as well as a mark, so it is given a little more to aim at.
+    static func length(along dockLength: CGFloat, prominent: Bool) -> CGFloat {
+        prominent ? min(max(dockLength * 0.4, 64), 180) : min(max(dockLength * 0.35, 48), 160)
+    }
 }
 
 /// Keeps the custom dock on screen for the active profile: a borderless panel on the
@@ -357,8 +366,8 @@ final class CustomDockWindowController {
         ManagerWindowController.shared.showCustomDock(of: profileID)
     }
 
-    fileprivate static func openWidgets(of profileID: UUID) {
-        ManagerWindowController.shared.showCustomDock(of: profileID, widgets: true)
+    fileprivate static func openWidgets(of profileID: UUID, widget: UUID?) {
+        ManagerWindowController.shared.showCustomDock(of: profileID, widgets: true, widget: widget)
     }
 
     // MARK: - Levels
@@ -518,6 +527,8 @@ private final class DockScreenPanel {
                 magnificationExtra: options.magnificationExtra,
                 look: options.look,
                 tint: content.color.color,
+                flatEdge: options.attachment == .attached ? edge : nil,
+                hoverCards: options.hoverCards,
                 screenLength: screenLength,
                 maxLength: options.maxLength.map { CGFloat($0) },
                 onReorder: CustomDockWindowController.reorder,
@@ -526,7 +537,7 @@ private final class DockScreenPanel {
             placement: placement,
             magnificationExtra: options.magnificationExtra,
             openSettings: content.profileID.map { id in { CustomDockWindowController.openSettings(of: id) } },
-            openWidgets: content.profileID.map { id in { CustomDockWindowController.openWidgets(of: id) } },
+            openWidgets: content.profileID.map { id in { widget in CustomDockWindowController.openWidgets(of: id, widget: widget) } },
             openGallery: { [weak self] in self?.openGallery() }
         )
 
@@ -614,6 +625,9 @@ private final class DockScreenPanel {
 
         let visible = screen.visibleFrame
         let margin = Self.margin
+        // Joined to the edge, the slab runs into it: no gap across the dock. Along
+        // the edge it keeps its margin, so a dock hugging a corner still clears it.
+        let across = options.attachment == .attached ? 0 : margin
         var origin = NSPoint.zero
 
         switch edge {
@@ -623,9 +637,9 @@ private final class DockScreenPanel {
             case .center: origin.x = visible.midX - size.width / 2
             case .trailing: origin.x = visible.maxX - size.width - margin
             }
-            origin.y = edge == .bottom ? visible.minY + margin : visible.maxY - size.height - margin
+            origin.y = edge == .bottom ? visible.minY + across : visible.maxY - size.height - across
         case .leading, .trailing:
-            origin.x = edge == .leading ? visible.minX + margin : visible.maxX - size.width - margin
+            origin.x = edge == .leading ? visible.minX + across : visible.maxX - size.width - across
             origin.y = visible.midY - size.height / 2
         }
         return NSRect(origin: origin, size: size)
@@ -691,9 +705,15 @@ private final class DockScreenPanel {
         }
     }
 
-    /// A thin band along the edge, as wide as the dock plus a little, that the
-    /// pointer runs into on its way to where the dock would be.
+    /// What the pointer has to reach for the dock to come back. In the pill mode
+    /// that is the pill itself, with a little room around it, so the rest of the
+    /// edge is left alone; otherwise a thin band along the whole edge the dock
+    /// would sit on, which the pointer runs into on its way there.
     private func triggerZone(for shown: NSRect) -> NSRect {
+        if isPill {
+            let pill = hintFrame(for: shown)
+            return edge.isVertical ? pill.insetBy(dx: -4, dy: -8) : pill.insetBy(dx: -8, dy: -4)
+        }
         let visible = screen.visibleFrame
         let reach: CGFloat = 40
         let depth: CGFloat = 6
@@ -756,8 +776,12 @@ private final class DockScreenPanel {
 
     // MARK: - Edge hint
 
+    /// Whether the pill is showing: the pill mode always leaves one, auto-hide only
+    /// when the profile asks for it.
+    private var isPill: Bool { options.visibility == .pill }
+
     private var wantsHint: Bool {
-        options.autohide && options.edgeHint && !revealed && !missionControlUp
+        options.showsEdgeMark && !revealed && !missionControlUp
     }
 
     private func updateHint() {
@@ -794,7 +818,7 @@ private final class DockScreenPanel {
     private func hintFrame(for shown: NSRect) -> NSRect {
         let visible = screen.visibleFrame
         let padding = DockEdgeHint.padding
-        let thickness = DockEdgeHint.thickness + padding * 2
+        let thickness = DockEdgeHint.thickness(prominent: isPill) + padding * 2
         let inset = DockEdgeHint.inset - padding
         // The panel carries headroom along the edge for magnified tiles; the slab
         // is what is left, hugging the end the profile asked for.
@@ -809,12 +833,12 @@ private final class DockScreenPanel {
             case .center: slabMidX = shown.midX
             case .trailing: slabMidX = shown.maxX - slabWidth / 2
             }
-            let length = DockEdgeHint.length(along: slabWidth) + padding * 2
+            let length = DockEdgeHint.length(along: slabWidth, prominent: isPill) + padding * 2
             let y = edge == .bottom ? visible.minY + inset : visible.maxY - inset - thickness
             return NSRect(x: slabMidX - length / 2, y: y, width: length, height: thickness)
         case .leading, .trailing:
             let slabHeight = shown.height - along
-            let length = DockEdgeHint.length(along: slabHeight) + padding * 2
+            let length = DockEdgeHint.length(along: slabHeight, prominent: isPill) + padding * 2
             let x = edge == .leading ? visible.minX + inset : visible.maxX - inset - thickness
             return NSRect(x: x, y: shown.midY - length / 2, width: thickness, height: length)
         }
@@ -824,7 +848,7 @@ private final class DockScreenPanel {
         guard let shown = shownFrame() else { return }
         makeHintPanelIfNeeded()
         guard let hintPanel, let hintHosting else { return }
-        hintHosting.rootView = DockEdgeHint(vertical: edge.isVertical, near: pointerNearHint, style: options.look.style)
+        hintHosting.rootView = DockEdgeHint(vertical: edge.isVertical, near: pointerNearHint, style: options.look.style, prominent: isPill)
         hintPanel.setFrame(hintFrame(for: shown), display: true)
         guard !hintShown else { return }
         hintShown = true
@@ -856,6 +880,6 @@ private final class DockScreenPanel {
         guard near != pointerNearHint else { return }
         pointerNearHint = near
         guard hintShown, let hintHosting else { return }
-        hintHosting.rootView = DockEdgeHint(vertical: edge.isVertical, near: near, style: options.look.style)
+        hintHosting.rootView = DockEdgeHint(vertical: edge.isVertical, near: near, style: options.look.style, prominent: isPill)
     }
 }

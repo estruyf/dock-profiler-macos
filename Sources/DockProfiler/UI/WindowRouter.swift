@@ -15,5 +15,8 @@ final class WindowRouter: ObservableObject {
     /// With `pendingCustomDock`: the Widgets tab rather than the dock's own — from
     /// a right-click on a widget.
     @Published var pendingWidgets = false
+    /// With `pendingWidgets`: the widget whose card should open and be scrolled to —
+    /// from a right-click or a double-click on that widget in the dock.
+    @Published var pendingWidgetID: UUID?
     private init() {}
 }

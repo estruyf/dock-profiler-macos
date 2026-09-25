@@ -96,9 +96,11 @@ Widgets: **Clock**, **Date**, **Battery**, **Accessories** (AirPods, keyboard, m
 and trackpad batteries), **Now Playing** (Music and Spotify),
 **Profiles**, **Trash**, **AirDrop**, **Folder** (a stack of its newest files),
 **App Stack**, **Launcher** (an app opened with arguments of your own — a browser as
-one of its profiles — under an icon of your own), **Agents** (your running Claude Code sessions, via
-[Agent Frame](https://github.com/estruyf/vscode-agent-frame)), and **AI Usage** (how
-much of your Claude and GitHub Copilot allowance is left).
+one of its profiles — under an icon of your own), **Agents** (your running Claude Code
+and Codex sessions, found by themselves, with
+[Agent Frame](https://github.com/estruyf/vscode-agent-frame) filling in which of them
+are waiting for you), **AI Usage** (how much of your Claude and GitHub Copilot
+allowance is left, or how much you have used), and **Divider** (a line between groups).
 
 Everything about it — positions, looks, each widget — is in
 [The custom dock](docs/custom-dock.md).

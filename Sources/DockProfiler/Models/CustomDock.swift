@@ -814,9 +814,6 @@ struct CustomDockOptions: Codable, Hashable {
     /// Whether the dock is always on screen, slides away until the pointer reaches
     /// its edge, or waits behind a pill on it.
     var visibility: DockVisibility = .always
-    /// While hidden behind auto-hide, a slim mark stays on the edge so you know the
-    /// dock is there. The pill is that mark made a target, so it is always drawn.
-    var edgeHint: Bool = true
     /// Whether the slab floats off its screen edge or is joined to it.
     var attachment: DockAttachment = .floating
     /// A widget's card opens when the pointer rests on it, rather than waiting for
@@ -845,15 +842,9 @@ struct CustomDockOptions: Codable, Hashable {
     /// hide it; they differ in what brings it back.
     var autohide: Bool { visibility.hides }
 
-    /// Whether a mark is left on the edge while the dock is away. The pill is one
-    /// by definition; auto-hide leaves it to the profile.
-    var showsEdgeMark: Bool {
-        switch visibility {
-        case .always: return false
-        case .autohide: return edgeHint
-        case .pill: return true
-        }
-    }
+    /// Whether a mark is left on the edge while the dock is away. Only the pill
+    /// leaves one; auto-hide leaves the edge clear.
+    var showsEdgeMark: Bool { visibility == .pill }
 
     /// The position every display takes unless it has one of its own.
     var placement: DockPlacement {
@@ -995,7 +986,7 @@ extension CustomDockOptions {
 /// falls back to its default instead of failing the whole store.
 extension CustomDockOptions {
     private enum CodingKeys: String, CodingKey {
-        case enabled, mode, edge, alignment, displays, displayPlacements, visibility, edgeHint, attachment, hoverCards, tileSize, magnification, magnifiedSize, maxLength, showsRunningApps, showsBadges, look, widgets
+        case enabled, mode, edge, alignment, displays, displayPlacements, visibility, attachment, hoverCards, tileSize, magnification, magnifiedSize, maxLength, showsRunningApps, showsBadges, look, widgets
     }
 
     /// Keys earlier versions wrote, and that are still written for them to read.
@@ -1021,7 +1012,6 @@ extension CustomDockOptions {
         let hid = try legacy.decodeIfPresent(Bool.self, forKey: .autohide) ?? false
         visibility = (try? container.decodeIfPresent(String.self, forKey: .visibility))
             .flatMap(DockVisibility.init(rawValue:)) ?? (hid ? .autohide : defaults.visibility)
-        edgeHint = try container.decodeIfPresent(Bool.self, forKey: .edgeHint) ?? defaults.edgeHint
         attachment = (try? container.decodeIfPresent(String.self, forKey: .attachment))
             .flatMap(DockAttachment.init(rawValue:)) ?? defaults.attachment
         hoverCards = try container.decodeIfPresent(Bool.self, forKey: .hoverCards) ?? defaults.hoverCards
@@ -1046,7 +1036,6 @@ extension CustomDockOptions {
         try container.encode(displays, forKey: .displays)
         try container.encode(displayPlacements, forKey: .displayPlacements)
         try container.encode(visibility, forKey: .visibility)
-        try container.encode(edgeHint, forKey: .edgeHint)
         try container.encode(attachment, forKey: .attachment)
         try container.encode(hoverCards, forKey: .hoverCards)
         try container.encode(tileSize, forKey: .tileSize)

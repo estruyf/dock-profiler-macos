@@ -22,6 +22,7 @@ final class BrowserProfileMonitor: ObservableObject {
     private var watchers: [String: DispatchSourceFileSystemObject] = [:]
     private var debounce: Task<Void, Never>?
     private var runningObservation: AnyCancellable?
+    private var accessObservation: AnyCancellable?
 
     private init() {
         refresh()
@@ -33,6 +34,10 @@ final class BrowserProfileMonitor: ObservableObject {
                 self?.refresh()
                 self?.scheduleRefresh()
             }
+        // Access granted in System Settings: the files can be read now.
+        accessObservation = BrowserDataAccess.shared.$status
+            .dropFirst()
+            .sink { [weak self] _ in self?.scheduleRefresh() }
     }
 
     /// Whether the profile has a window up — false for a browser that is not

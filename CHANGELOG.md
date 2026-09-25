@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-09-25
+
+### Added
+
+- **Browser profiles where macOS keeps them to the browser.** Recent macOS
+  lets an app see the file a browser lists its profiles in, but not open it,
+  so a browser tile's menu, a launcher's profile picker and a profile's running
+  dot came up empty with no word why. Dock Profiler now notices, and offers
+  **Show Profiles Here…** in those places, which leads to Full Disk Access.
+  Only the profile list is read. The welcome window asks for it beside
+  Accessibility, and Settings shows whether it is allowed. Once access is
+  granted in System Settings, the profiles appear when you come back.
+
+### Changed
+
+- **Position has more room.** The Showing picker no longer runs into its
+  label, and the rows and the screen diagram sit further apart.
+- **Hide automatically leaves the edge clear.** The *Leave a mark on the edge
+  while it is hidden* option is gone: that mark is what the pill is for, so
+  choose *Pill on the edge* in Position → Showing to keep one.
+
+### Added
+
+- **Browser profiles as a permission.** Recent macOS keeps each browser's files
+  to the browser, and there the **Profiles** submenu, a launcher's profile picker
+  and the per-profile running dots quietly had nothing to show. Dock Profiler now
+  checks whether it can read the browsers' profile lists and asks for Full Disk
+  Access where it cannot: a **Browser profiles** row on the welcome screen and in
+  Settings → Permissions, and **Show Profiles Here…** in a browser tile's menu and
+  on a launcher's card in place of the missing profiles. Granted in System
+  Settings, the profiles show up when you come back, without a restart.
+
 ## [1.14.0] - 2026-09-24
 
 ### Added

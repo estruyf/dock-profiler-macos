@@ -1,15 +1,17 @@
 import AppKit
 import SwiftUI
 
-/// First run: one sentence, one button, and the one permission worth granting
+/// First run: one sentence, one button, and the permissions worth granting
 /// up front. No tour, no carousel.
 struct WelcomeView: View {
     @EnvironmentObject private var store: ProfileStore
     @ObservedObject private var settings = AppSettings.shared
     @ObservedObject private var badges = DockBadgeMonitor.shared
+    @ObservedObject private var browserAccess = BrowserDataAccess.shared
     /// Set once Allow has been pressed: macOS shows its dialog only the first
     /// time, so from then on the way in is System Settings.
     @State private var askedForAccessibility = false
+    @State private var askedForBrowserData = false
     let onFinish: (UUID?) -> Void
 
     var body: some View {
@@ -52,7 +54,7 @@ struct WelcomeView: View {
             }
             .padding(.top, 24)
 
-            Text("Nothing else needs a permission: Dock Profiler reads and writes your Dock, and that is all. A widget that talks to Music, Spotify or Finder, or reads a folder, asks on its own the first time.")
+            Text("Nothing else needs a permission up front: Dock Profiler reads and writes your Dock, and that is all. A widget that talks to Music, Spotify or Finder, or reads a folder, asks on its own the first time.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
                 .multilineTextAlignment(.center)
@@ -65,6 +67,7 @@ struct WelcomeView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             badges.refreshTrust()
+            browserAccess.refresh()
             settings.refreshLoginItemStatus()
         }
     }
@@ -113,44 +116,42 @@ struct WelcomeView: View {
 
     // MARK: - Permissions
 
-    /// The one permission the app can ask for ahead of time. Optional: without it
-    /// everything works except the badges.
+    /// The permissions the app can ask for ahead of time, one row each. Both
+    /// optional: without them everything works except the badges and window
+    /// lists, and the browsers' profiles.
     private var permissions: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 26, height: 26)
-                .background(Circle().fill(Color.primary.opacity(0.08)))
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Accessibility — optional")
-                    .font(.system(size: 15, weight: .medium))
-                Text("Lets a custom dock show the Dock's notification badges — WhatsApp's unread count, Mail's — on its app tiles, and list an app's open windows when you right-click its tile. Nothing else is read.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if askedForAccessibility, !badges.isTrusted {
-                    Button("Open Accessibility Settings…") { DockBadgeMonitor.openAccessibilitySettings() }
-                        .buttonStyle(.link)
-                        .font(.system(size: 12))
-                        .padding(.top, 2)
-                }
-            }
-            Spacer(minLength: 12)
-            if badges.isTrusted {
-                Label("Allowed", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.green)
-                    .padding(.top, 4)
-            } else {
-                Button("Allow…") {
+        VStack(spacing: 0) {
+            permission(
+                symbol: "hand.raised.fill",
+                title: "Accessibility — optional",
+                detail: "Lets a custom dock show the Dock's notification badges — WhatsApp's unread count, Mail's — on its app tiles, and list an app's open windows when you right-click its tile. Nothing else is read.",
+                isAllowed: badges.isTrusted,
+                askedBefore: askedForAccessibility,
+                openSettingsTitle: "Open Accessibility Settings…",
+                openSettings: DockBadgeMonitor.openAccessibilitySettings,
+                allow: {
                     askedForAccessibility = true
                     badges.requestAccess()
                 }
-                .controlSize(.regular)
+            )
+            // Only on a Mac with a browser whose profiles there would be to read.
+            if browserAccess.status != .noBrowsers {
+                Divider().padding(.leading, 56)
+                permission(
+                    symbol: "person.2.fill",
+                    title: "Browser profiles — optional",
+                    detail: "Lets a browser's tile list its profiles — Chrome's, Edge's, Firefox's — and a launcher open one. macOS keeps each browser's files to itself unless Dock Profiler has Full Disk Access. Only the profile list is read.",
+                    isAllowed: browserAccess.isAllowed,
+                    askedBefore: askedForBrowserData,
+                    openSettingsTitle: "Open Full Disk Access Settings…",
+                    openSettings: BrowserDataAccess.openSettings,
+                    allow: {
+                        askedForBrowserData = true
+                        browserAccess.requestAccess()
+                    }
+                )
             }
         }
-        .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
@@ -159,6 +160,50 @@ struct WelcomeView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08))
         )
+    }
+
+    private func permission(
+        symbol: String,
+        title: String,
+        detail: String,
+        isAllowed: Bool,
+        askedBefore: Bool,
+        openSettingsTitle: String,
+        openSettings: @escaping () -> Void,
+        allow: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(Color.primary.opacity(0.08)))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 15, weight: .medium))
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if askedBefore, !isAllowed {
+                    Button(openSettingsTitle, action: openSettings)
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                        .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 12)
+            if isAllowed {
+                Label("Allowed", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.green)
+                    .padding(.top, 4)
+            } else {
+                Button("Allow…", action: allow)
+                    .controlSize(.regular)
+            }
+        }
+        .padding(16)
     }
 
     private var appIcon: some View {

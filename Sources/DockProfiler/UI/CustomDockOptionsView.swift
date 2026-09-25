@@ -165,9 +165,9 @@ struct CustomDockOptionsView: View {
     // MARK: - Position
 
     private var positionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
                     row("Edge") {
                         Picker("Edge", selection: $options.edge) {
                             ForEach(DockStripEdge.allCases) { edge in
@@ -207,15 +207,10 @@ struct CustomDockOptionsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(maxWidth: 300)
+                .fixedSize()
             }
             indented {
-                VStack(alignment: .leading, spacing: 6) {
-                    caption(options.visibility.summary)
-                    if options.visibility == .autohide {
-                        Toggle("Leave a mark on the edge while it is hidden", isOn: $options.edgeHint)
-                    }
-                }
+                caption(options.visibility.summary)
             }
             row("Sits") {
                 Picker("Sits", selection: $options.attachment) {
@@ -1484,6 +1479,7 @@ private struct LauncherFields: View {
     /// The profiles of the browser it opens, read when the app changes.
     @State private var browserProfiles: [BrowserProfile] = []
     @State private var iconTargeted = false
+    @ObservedObject private var browserAccess = BrowserDataAccess.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1505,6 +1501,7 @@ private struct LauncherFields: View {
             return false
         }
         .task(id: tile.path) { loadBrowserProfiles() }
+        .onChange(of: browserAccess.status) { loadBrowserProfiles() }
     }
 
     private var fields: some View {
@@ -1535,6 +1532,13 @@ private struct LauncherFields: View {
                         .labelsHidden()
                         .controlSize(.small)
                         .frame(maxWidth: 220, alignment: .leading)
+                    }
+                } else if opensBrowser, !browserAccess.isAllowed {
+                    GridRow {
+                        gridLabel("Profile")
+                        Button("Show Profiles Here…") { browserAccess.requestAccess() }
+                            .controlSize(.small)
+                            .help("macOS keeps the browser's profiles from other apps until Dock Profiler has Full Disk Access.")
                     }
                 }
                 GridRow {
@@ -1685,6 +1689,11 @@ private struct LauncherFields: View {
                 tile.browserProfile = browserProfiles.first { $0.id == id }.map { BrowserProfileRef(id: $0.id, name: $0.name) }
             }
         )
+    }
+
+    /// Whether the app it opens is a browser whose profiles can be listed.
+    private var opensBrowser: Bool {
+        BrowserProfiles.isBrowser(tile.appURL.flatMap { Bundle(url: $0)?.bundleIdentifier })
     }
 
     private func loadBrowserProfiles() {

@@ -90,7 +90,8 @@ radius alone.
   whatever the system appearance — tiles, tips and stacks follow the slab; on macOS
   Tahoe, **Liquid Glass**, refracting what is behind it; or **transparent**, no slab at
   all, each widget on its own card. Those two read the wallpaper under the dock and go
-  light or dark to suit it, as the Tahoe Dock does.
+  light or dark to suit it, as the Tahoe Dock does. A wallpaper that is neither clearly
+  light nor clearly dark there leaves them in the system appearance.
 - The slab can blur what is behind it or be drawn solid — clear, for Liquid Glass —
   and is solid regardless while macOS's Reduce transparency is on.
 - It can take a wash of the profile's colour, so each profile's dock is its own.

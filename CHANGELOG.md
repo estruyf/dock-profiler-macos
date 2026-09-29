@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of sight behind any custom dock. Its own size comes back with the rest of its
   settings, when you switch to a profile without a combined dock or quit Dock
   Profiler.
+- **Text on a Liquid Glass or transparent dock turned dark over a dark window.**
+  These looks go light or dark to suit the wallpaper under them, and a wallpaper
+  only just on the light side was enough to make them light, even in Dark Mode
+  and with a dark window behind the dock, where the text could not be read. Now
+  only a clearly light or clearly dark wallpaper decides; anything in between
+  keeps the system appearance.
 
 ## [1.15.0] - 2026-09-25
 

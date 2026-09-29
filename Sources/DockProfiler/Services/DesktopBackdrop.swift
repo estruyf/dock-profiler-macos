@@ -31,8 +31,8 @@ final class DesktopBackdrop {
     private init() {}
 
     /// Whether the desktop is light under `rect`, given in screen coordinates. Nil
-    /// when there is no picture to read — an aerial wallpaper, say — in which case
-    /// the dock follows the system as before.
+    /// when there is no picture to read — an aerial wallpaper, say — or when it is
+    /// neither clearly light nor clearly dark; the dock then follows the system.
     func isLight(under rect: NSRect, on screen: NSScreen) -> Bool? {
         let workspace = NSWorkspace.shared
         let options = workspace.desktopImageOptions(for: screen) ?? [:]
@@ -46,7 +46,13 @@ final class DesktopBackdrop {
             of: picture, fill: fill, scaling: fit ? .scaleProportionallyUpOrDown : scaling.flatMap { NSImageScaling(rawValue: UInt($0)) },
             fit: fit, under: rect, on: screen.frame
         ) else { return nil }
-        return luminance > 0.55
+        // A single cut-off flips the dock on a picture that is only just light or
+        // dark, and the picture is all it sees: a dark window over a mid-tone
+        // wallpaper left dark text on a dark slab. Between the two, either
+        // appearance reads, so the one the user chose wins.
+        if luminance > 0.65 { return true }
+        if luminance < 0.45 { return false }
+        return nil
     }
 
     private static var systemIsDark: Bool {

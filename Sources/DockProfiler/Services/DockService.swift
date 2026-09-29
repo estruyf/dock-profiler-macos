@@ -6,10 +6,17 @@ struct DockHideState: Codable, Equatable {
     var autohide: Bool
     /// `autohide-delay`, when the user has one set; nil means the key is absent.
     var autohideDelay: Double?
+    /// `tilesize`, when the user has one set; nil means the key is absent. A state
+    /// kept by a version from before the Dock was parked small has none either —
+    /// see `ProfileStore.rememberDockState()`.
+    var tileSize: Double?
 
     /// Auto-hidden with a delay so long the Dock never comes back on its own —
-    /// ⌘⌥D still toggles it, and it returns when this state is restored.
-    static let parked = DockHideState(autohide: true, autohideDelay: 1_000_000)
+    /// ⌘⌥D still toggles it, and it returns when this state is restored. It is
+    /// also as small as the Dock goes: Mission Control draws the Dock whether it
+    /// is hidden or not, and a Dock this size stays out of sight behind the custom
+    /// dock, whose smallest tile is still more than twice as big.
+    static let parked = DockHideState(autohide: true, autohideDelay: 1_000_000, tileSize: 16)
 }
 
 struct DockSnapshot {
@@ -78,7 +85,8 @@ enum DockService {
         CFPreferencesAppSynchronize(domain)
         return DockHideState(
             autohide: value("autohide", as: Bool.self) ?? false,
-            autohideDelay: value("autohide-delay", as: Double.self)
+            autohideDelay: value("autohide-delay", as: Double.self),
+            tileSize: value("tilesize", as: Double.self)
         )
     }
 
@@ -118,6 +126,7 @@ enum DockService {
         } else {
             CFPreferencesSetAppValue("autohide-delay" as CFString, nil, domain)
         }
+        CFPreferencesSetAppValue("tilesize" as CFString, hideState.tileSize.map { $0 as CFNumber }, domain)
     }
 
     /// Writes a hide state on its own and restarts the Dock — for putting it back

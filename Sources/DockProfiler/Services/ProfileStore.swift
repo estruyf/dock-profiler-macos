@@ -119,7 +119,7 @@ final class ProfileStore: ObservableObject {
         var profile = DockProfile.empty(named: name)
         profile.color = ProfileColor.allCases[profiles.count % ProfileColor.allCases.count]
         if capturingCurrentDock {
-            let snapshot = DockService.snapshot()
+            let snapshot = currentDock()
             profile.apps = snapshot.apps
             profile.others = snapshot.others
             var appearance = snapshot.appearance
@@ -181,7 +181,7 @@ final class ProfileStore: ObservableObject {
     /// Replaces a profile's items with whatever is pinned to the Dock right now.
     func captureCurrentDock(into id: UUID) {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
-        let snapshot = DockService.snapshot()
+        let snapshot = currentDock()
         profiles[index].apps = snapshot.apps
         profiles[index].others = snapshot.others
         if profiles[index].appearance.enabled {
@@ -213,12 +213,10 @@ final class ProfileStore: ObservableObject {
         // neither stands in for it nor manages Dock settings itself.
         var hideState: DockHideState?
         if profile.customDock.isCombined {
-            if settings.dockStateBeforeCustomDock == nil {
-                settings.dockStateBeforeCustomDock = DockService.readHideState()
-            }
+            rememberDockState(DockService.readHideState())
             hideState = .parked
         } else if let previous = settings.dockStateBeforeCustomDock {
-            hideState = profile.appearance.enabled ? DockHideState(autohide: profile.appearance.autohide, autohideDelay: previous.autohideDelay) : previous
+            hideState = profile.appearance.enabled ? DockHideState(autohide: profile.appearance.autohide, autohideDelay: previous.autohideDelay, tileSize: profile.appearance.tileSize) : previous
             settings.dockStateBeforeCustomDock = nil
         }
 
@@ -253,9 +251,7 @@ final class ProfileStore: ObservableObject {
         guard let profile = activeProfile, profile.customDock.isCombined else { return }
         let current = DockService.readHideState()
         guard current != .parked else { return }
-        if settings.dockStateBeforeCustomDock == nil {
-            settings.dockStateBeforeCustomDock = current
-        }
+        rememberDockState(current)
         ignoreDockChangesUntil = Date().addingTimeInterval(6)
         DockService.applyHideStateNow(.parked)
     }
@@ -265,6 +261,32 @@ final class ProfileStore: ObservableObject {
         guard let previous = settings.dockStateBeforeCustomDock else { return }
         settings.dockStateBeforeCustomDock = nil
         DockService.applyHideStateNow(previous)
+    }
+
+    /// Keeps the Dock's own settings before it is parked — only the first time, so
+    /// parking it again does not mistake the parked state for the user's. A state
+    /// kept by an earlier version has no tile size, since parking left the size
+    /// alone then; the Dock still has the user's, so it is taken from there.
+    private func rememberDockState(_ current: DockHideState) {
+        guard var kept = settings.dockStateBeforeCustomDock else {
+            settings.dockStateBeforeCustomDock = current
+            return
+        }
+        if kept.tileSize == nil, let size = current.tileSize, size != DockHideState.parked.tileSize {
+            kept.tileSize = size
+            settings.dockStateBeforeCustomDock = kept
+        }
+    }
+
+    /// The Dock as it is, except that while it is parked its hiding and size are
+    /// the user's from before, not the ones parking put there.
+    private func currentDock() -> DockSnapshot {
+        var snapshot = DockService.snapshot()
+        if let kept = settings.dockStateBeforeCustomDock {
+            snapshot.appearance.autohide = kept.autohide
+            if let size = kept.tileSize { snapshot.appearance.tileSize = size }
+        }
+        return snapshot
     }
 
     // MARK: - Auto-save
@@ -279,7 +301,7 @@ final class ProfileStore: ObservableObject {
         // what was just dragged together on the custom dock itself.
         guard !profiles[index].customDock.isCombined else { return }
 
-        let snapshot = DockService.snapshot()
+        let snapshot = currentDock()
         var changed = false
 
         // Finder is never in the Dock's own list, so it is left out of the comparison

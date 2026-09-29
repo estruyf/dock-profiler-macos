@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The macOS Dock no longer shows in Mission Control behind a combined custom
+  dock.** Mission Control always draws the Dock, even while Dock Profiler keeps it
+  out of the way, and a custom dock joined to the edge or set to compact was too
+  thin to cover it, so the Dock peeked out above. While a combined dock is
+  active the macOS Dock is now also made as small as it goes, which keeps it out
+  of sight behind any custom dock. Its own size comes back with the rest of its
+  settings, when you switch to a profile without a combined dock or quit Dock
+  Profiler.
+
 ## [1.15.0] - 2026-09-25
 
 ### Added

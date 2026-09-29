@@ -71,14 +71,16 @@ sits below the Dock's own window level so an auto-hidden macOS Dock still slides
 over it.
 
 While a combined dock (apps and widgets) is active the macOS Dock is parked —
-auto-hidden with a delay so long it never comes back on hover (⌘⌥D still toggles it).
-Its own settings come back with the next profile that neither stands in for it nor
-manages Dock settings itself, and when Dock Profiler quits.
+auto-hidden with a delay so long it never comes back on hover (⌘⌥D still toggles it),
+and shrunk to its smallest tile size. Its own settings, size included, come back with
+the next profile that neither stands in for it nor manages Dock settings itself, and
+when Dock Profiler quits.
 
 In Mission Control a combined dock stays on screen in place of the macOS Dock — drawn
 just above the Dock's own window level, the one Mission Control does not hide. Mission
 Control still draws the parked macOS Dock underneath; there is no API to stop it, but
-the custom dock sits in front of it.
+at its smallest size it stays hidden behind the custom dock, even a compact one joined
+to the edge.
 
 **Hide until the pointer reaches its edge** polls the pointer position rather than
 installing an event tap, so it needs no Accessibility permission either.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.1] - 2026-09-29
+
 ### Fixed
 
 - **The macOS Dock no longer shows in Mission Control behind a combined custom

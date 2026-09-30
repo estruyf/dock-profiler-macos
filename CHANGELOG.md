@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-09-30
+
 ### Added
 
 - **Quit a launcher's app from the dock.** Right-click a launcher for *Quit*. It

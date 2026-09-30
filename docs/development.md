@@ -75,6 +75,8 @@ Sources/DockProfiler/
   Services/AppWindows.swift           Another app's windows and New Window, through Accessibility, for the tile menus
   Services/BrowserProfiles.swift      Chrome's and Firefox's profiles, for the browsers' tile menus
   Services/AppleScriptRunner.swift    AppleScript in an osascript child, off the main thread
+  Services/Launcher.swift             Opening a launcher's app, and finding the copy it started
+  Services/ProcessArguments.swift     A process's command line, for the launchers and the agents widget
   Services/RunningAppsMonitor.swift   Running apps, for the custom dock's dots
   Services/DockBadgeMonitor.swift     The Dock's badges through Accessibility, for the tiles
   Services/ProfileStore.swift  Profiles, activation, JSON persistence

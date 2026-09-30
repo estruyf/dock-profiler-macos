@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Quit a launcher's app from the dock.** Right-click a launcher for *Quit*. It
+  quits the launcher's own copy of the app, so your other copy stays open. For a
+  launcher without arguments, it quits the app. Launchers for a browser profile
+  have no Quit, since that would close every profile.
+
+### Changed
+
+- **A launcher with arguments follows its own copy of the app.** A launcher that
+  starts a second copy of an app, such as Claude with a separate
+  `--user-data-dir` for a work account, used to open another copy on every click,
+  and its running dot lit up whenever any copy of the app was open. The dot now
+  shows whether the launcher's own copy is running, and a click brings that copy
+  to the front, with its window back if you had closed it. Apps that keep to one
+  copy, like browsers and VS Code, still open a window on each click. macOS may
+  ask once whether Dock Profiler may control the app, the first time it brings a
+  closed window back.
+
 ## [1.15.2] - 2026-09-30
 
 ### Fixed

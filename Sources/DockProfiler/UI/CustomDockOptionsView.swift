@@ -1664,7 +1664,7 @@ private struct LauncherFields: View {
 
     private var launcherHint: String {
         if launcherAppMissing { return "The app has moved or been deleted." }
-        var hint = "Opens a fresh copy of the app with these arguments — a browser or an editor already running takes them over and opens a window."
+        var hint = "Opens a fresh copy of the app with these arguments — a browser or an editor already running takes them over and opens a window. While that copy runs, a click brings it forward."
         if !browserProfiles.isEmpty { hint = "The profile fills in the browser's own switch; anything more goes in Arguments. " + hint }
         hint += " Quote an argument with spaces; ~/ is your home folder."
         if tile.browserProfile != nil, tile.iconPath == nil {

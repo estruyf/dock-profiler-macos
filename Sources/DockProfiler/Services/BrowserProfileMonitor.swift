@@ -48,11 +48,13 @@ final class BrowserProfileMonitor: ObservableObject {
 
     /// Whether a launcher counts as running: its app is up and, for a browser
     /// opened as one of its profiles, that profile has a window. A launcher with
-    /// no profile goes by the app alone.
+    /// arguments goes by the copy it started, and one with neither by the app alone.
     func isRunning(_ tile: WidgetTile, among running: Set<String>) -> Bool {
         guard let identifier = tile.appURL.flatMap({ Bundle(url: $0)?.bundleIdentifier }),
               running.contains(identifier) else { return false }
-        guard let profile = tile.browserProfile else { return true }
+        guard let profile = tile.browserProfile else {
+            return Launcher.arguments(of: tile).isEmpty || Launcher.instance(of: tile) != nil
+        }
         return isOpen(profile.id, of: identifier)
     }
 

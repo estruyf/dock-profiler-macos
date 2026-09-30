@@ -44,6 +44,10 @@ enum Launcher {
                 return
             }
         }
+        if let app = instance(of: tile) {
+            bringForward(app)
+            return
+        }
         let arguments = arguments(of: tile)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.arguments = arguments
@@ -52,6 +56,94 @@ enum Launcher {
             NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first { !$0.isTerminated }?.unhide()
         }
         NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    }
+
+    // MARK: - The launcher's own copy
+
+    /// The copy of the app this launcher started, while it runs: a running
+    /// instance whose command line carries the tile's arguments. An app that
+    /// runs as several instances — Claude with a second `--user-data-dir` — can
+    /// then be told apart from the copy opened the usual way, and so gets its
+    /// own running dot and is brought forward rather than started again. An app
+    /// that keeps to one instance hands the arguments over and quits, so there
+    /// is never a copy to find and each click still opens a window. Browser
+    /// profiles have their own way of knowing, and a launcher without arguments
+    /// is the app itself.
+    @MainActor
+    static func instance(of tile: WidgetTile) -> NSRunningApplication? {
+        guard tile.browserProfile == nil,
+              let identifier = tile.appURL.flatMap({ Bundle(url: $0)?.bundleIdentifier }) else { return nil }
+        let wanted = arguments(of: tile)
+        guard !wanted.isEmpty else { return nil }
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
+        return apps.first { app in
+            guard let line = commandLine(of: app.processIdentifier) else { return false }
+            // The executable's path and argv[0] come first; macOS may add its own after ours.
+            let given = Array(line.dropFirst(2))
+            guard given.count >= wanted.count else { return false }
+            return (0...(given.count - wanted.count)).contains { Array(given[$0..<$0 + wanted.count]) == wanted }
+        }
+    }
+
+    /// What Quit on the launcher's menu quits: its own copy, or with no arguments
+    /// the app, as an app tile's Quit does. Nothing for a browser profile — the
+    /// browser is one process for all its profiles, so quitting it would close
+    /// the others too.
+    @MainActor
+    static func quittable(_ tile: WidgetTile) -> [NSRunningApplication] {
+        guard tile.browserProfile == nil else { return [] }
+        if let app = instance(of: tile) { return [app] }
+        guard arguments(of: tile).isEmpty,
+              let identifier = tile.appURL.flatMap({ Bundle(url: $0)?.bundleIdentifier }) else { return [] }
+        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier).filter { !$0.isTerminated }
+    }
+
+    /// Command lines by process, since a process's never changes and the dot
+    /// asks on every redraw. Processes that have gone are dropped as they are
+    /// noticed, so a reused process id is read afresh.
+    @MainActor private static var commandLines: [pid_t: [String]] = [:]
+
+    @MainActor
+    private static func commandLine(of pid: pid_t) -> [String]? {
+        if let known = commandLines[pid] { return known }
+        let live = Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier))
+        commandLines = commandLines.filter { live.contains($0.key) }
+        guard let line = ProcessArgumentReader()?.arguments(of: pid) else { return nil }
+        commandLines[pid] = line
+        return line
+    }
+
+    /// Brings the launcher's copy forward — that instance, not whichever one
+    /// Launch Services would pick. With no window of its own on screen — closed,
+    /// or minimized — it is also sent the reopen event a click on its Dock icon
+    /// sends, which puts a window back. That is an Apple Event, so macOS may ask
+    /// once whether Dock Profiler may control the app; it is sent off the main
+    /// thread so the question never holds up the dock.
+    @MainActor
+    private static func bringForward(_ app: NSRunningApplication) {
+        if app.isHidden { app.unhide() }
+        app.activate()
+        guard !hasWindowOnScreen(app.processIdentifier) else { return }
+        let pid = app.processIdentifier
+        DispatchQueue.global(qos: .userInitiated).async {
+            let event = NSAppleEventDescriptor(
+                eventClass: AEEventClass(kCoreEventClass),
+                eventID: AEEventID(kAEReopenApplication),
+                targetDescriptor: NSAppleEventDescriptor(processIdentifier: pid),
+                returnID: AEReturnID(kAutoGenerateReturnID),
+                transactionID: AETransactionID(kAnyTransactionID)
+            )
+            _ = try? event.sendEvent(options: .noReply, timeout: 5)
+        }
+    }
+
+    /// Whether the process has an ordinary window on screen. The window list's
+    /// owners and layers need no permission; only titles would.
+    private static func hasWindowOnScreen(_ pid: pid_t) -> Bool {
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return windows.contains {
+            ($0[kCGWindowOwnerPID as String] as? pid_t) == pid && ($0[kCGWindowLayer as String] as? Int) == 0
+        }
     }
 
     /// Splits a line into arguments as a shell would: on whitespace, keeping what

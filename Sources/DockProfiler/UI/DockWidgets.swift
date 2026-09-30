@@ -398,6 +398,11 @@ struct LauncherWidget: View {
             if let url = tile.appURL, !isMissing {
                 Button("Open") { open() }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+                let running = Launcher.quittable(tile)
+                if !running.isEmpty {
+                    Divider()
+                    Button("Quit") { for app in running { app.terminate() } }
+                }
             }
         }
     }

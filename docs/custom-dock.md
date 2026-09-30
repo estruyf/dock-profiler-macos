@@ -244,12 +244,25 @@ the widget menu and set it up on its card in the editor:
   both.
 
 On the dock a launcher looks and behaves like an app tile: click to open, the running
-dot underneath, Open and Show in Finder on right-click, along with the app, the
-profile and the icon to change in place. A launcher with no profile and no arguments
+dot underneath, Open, Show in Finder and Quit on right-click, along with the app, the
+profile and the icon to change in place. Quit closes what the launcher opened: its
+own copy of the app when it has arguments, the app when it has none. A launcher
+for a browser profile has no Quit, since the browser is one app for all its
+profiles and quitting it would close the others too. A launcher with no profile and no arguments
 is just an app tile with its own icon: it brings a running app forward rather than
 opening a second copy. With arguments there has to be a new process, since a running
 app is never handed them; apps that keep to one instance — the browsers, VS Code —
 take it over and answer with a window, and others open a second copy.
+
+That second copy belongs to the launcher. Say Claude is started with a
+`--user-data-dir` of its own for a work account: the launcher's running dot is
+lit while *that* copy runs, not the one you opened from Applications, and a click
+brings it to the front instead of starting yet another. If you closed its window,
+the click puts one back, as a click on a Dock icon does. Dock Profiler knows the
+copy by its command line, the arguments it was started with. An app that keeps to
+one instance takes the arguments over and the new process quits, so there is no
+separate copy to follow: each click opens a window, as before, and the dot
+stays dark.
 
 A launcher for a browser profile is that profile's own tile, the way Windows gives
 each profile its own taskbar button — something the macOS Dock cannot do, since it

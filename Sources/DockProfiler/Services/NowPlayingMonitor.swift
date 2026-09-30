@@ -255,11 +255,15 @@ final class NowPlayingMonitor: ObservableObject {
         }
     }
 
-    /// Brings the player forward.
+    /// Brings the player forward with a window showing. It is opened again, as a
+    /// click on a dock tile does, rather than activated: from a background app
+    /// `activate()` can be refused, and a player whose window was closed — Spotify
+    /// keeps playing without one — would come forward with nothing to show. Opening
+    /// it sends the reopen event that puts the window back.
     func revealPlayer() {
         let player = track?.player ?? MediaPlayer.allCases.first { $0.runningApplication != nil }
-        guard let app = player?.runningApplication else { return }
+        guard let app = player?.runningApplication, let url = app.bundleURL else { return }
         app.unhide()
-        app.activate()
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 }

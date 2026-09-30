@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Open Spotify in the music widget did not bring Spotify to the front.** The
+  item in the widget's menu (*Open Spotify* or *Open Music*) asked the player to
+  come forward, which macOS could ignore. If you had closed the player's window
+  while the music kept playing, it came forward with no window to show. It now
+  opens the player the way a click on its dock icon does, so it comes to the
+  front with its window.
+
 ## [1.15.1] - 2026-09-29
 
 ### Fixed
